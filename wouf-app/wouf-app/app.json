@@ -1,0 +1,49 @@
+{
+  "expo": {
+    "name": "WOUF",
+    "slug": "wouf-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./src/assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "backgroundColor": "#060C17"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.wouf.app",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "WOUF a besoin du micro pour enregistrer et analyser les aboiements de ton chien.",
+        "NSCameraUsageDescription": "WOUF utilise la caméra pour prendre une photo de ton chien.",
+        "NSPhotoLibraryUsageDescription": "WOUF accède à ta galerie pour ajouter une photo de ton chien."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#060C17"
+      },
+      "package": "com.wouf.app",
+      "permissions": [
+        "RECORD_AUDIO",
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE"
+      ]
+    },
+    "plugins": [
+      "expo-notifications",
+      [
+        "expo-av",
+        {
+          "microphonePermission": "WOUF a besoin du micro pour analyser les aboiements."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "WOUF accède à ta galerie pour la photo de ton chien.",
+          "cameraPermission": "WOUF utilise la caméra pour photographier ton chien."
+        }
+      ]
+    ]
+  }
+}
