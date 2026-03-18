@@ -9,9 +9,10 @@
 import React, { useState, useContext, useRef } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, Image, Alert } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import { ThemeContext, DogsContext } from '../../../App';
+import { ThemeContext, DogsContext } from '../../context/appContexts';
 import { dogService, profileService } from '../../services/database';
 import { BREEDS, PERSONALITIES, TRIGGERS, HEALTH_SIGNS, PHYSICAL_SPECS, ACTIVITIES, SIZES } from '../../config/constants';
+import { getUserFacingError } from '../../services/userFacingErrors';
 
 const STEPS = ['photo', 'identity', 'breed', 'size', 'personality', 'triggers', 'environment', 'health', 'summary'];
 
@@ -45,7 +46,7 @@ export default function DogProfileScreen({ navigation }) {
 
   const takePhoto = async () => {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== 'granted') { Alert.alert('Permission requise'); return; }
+    if (status !== 'granted') { Alert.alert('Permission requise', 'Active l’accès caméra si tu veux prendre une photo maintenant.'); return; }
     const result = await ImagePicker.launchCameraAsync({
       allowsEditing: true, aspect: [1, 1], quality: 0.7,
     });
@@ -53,17 +54,39 @@ export default function DogProfileScreen({ navigation }) {
   };
 
   const saveDog = async () => {
+    if (!dog.name.trim()) {
+      Alert.alert('Nom requis', 'Ajoute au moins le nom de ton chien pour continuer.');
+      return;
+    }
+
     setSaving(true);
     try {
-      const created = await dogService.create(dog);
+      const created = await dogService.create({
+        ...dog,
+        name: dog.name.trim(),
+        favTreats: dog.favTreats.trim(),
+        favToys: dog.favToys.trim(),
+      });
+
+      let photoNotice = null;
       if (dog.photo) {
-        await dogService.uploadPhoto(created.id, dog.photo);
+        try {
+          await dogService.uploadPhoto(created.id, dog.photo);
+        } catch (photoError) {
+          console.warn('[DogProfile] photo upload skipped', photoError?.message || 'unknown_error');
+          photoNotice = 'Le profil est créé, mais la photo sera à réessayer plus tard.';
+        }
       }
+
       await profileService.addXp(200);
       await refreshDogs();
+
+      if (photoNotice) {
+        Alert.alert('Profil créé', photoNotice);
+      }
       // Navigation automatique via App.js (hasOnboarded = true)
     } catch (error) {
-      Alert.alert('Erreur', error.message);
+      Alert.alert('Erreur', getUserFacingError(error, 'Impossible de créer le profil chien pour le moment.'));
     } finally {
       setSaving(false);
     }

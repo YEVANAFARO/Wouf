@@ -13,8 +13,9 @@ import React, { useState, useContext } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView, Alert, KeyboardAvoidingView, Platform,
 } from 'react-native';
-import { ThemeContext } from '../../../App';
-import { auth } from '../../config/supabase';
+import { ThemeContext } from '../../context/appContexts';
+import { auth, supabase } from '../../config/supabase';
+import { getUserFacingError } from '../../services/userFacingErrors';
 
 export default function AuthScreen({ navigation }) {
   const { colors } = useContext(ThemeContext);
@@ -38,25 +39,68 @@ export default function AuthScreen({ navigation }) {
 
   const handleSubmit = async () => {
     setError('');
-    if (!email.includes('@') || !email.includes('.')) { setError('Email invalide.'); return; }
-    if (password.length < 6) { setError('6 caractères minimum.'); return; }
-    if (mode === 'signup' && password !== password2) { setError('Mots de passe différents.'); return; }
+
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanPassword = password;
+
+    if (!cleanEmail.includes('@') || !cleanEmail.includes('.')) { setError('Entre un email valide.'); return; }
+    if (cleanPassword.length < 6) { setError('Le mot de passe doit contenir au moins 6 caractères.'); return; }
+    if (mode === 'signup' && cleanPassword !== password2) { setError('Les mots de passe sont différents.'); return; }
 
     setLoading(true);
     try {
       if (mode === 'signup') {
-        await auth.signUp(email, password);
+        const signUpData = await auth.signUp(cleanEmail, cleanPassword);
+        let referralNotice = null;
+
+        // Persist user-owned optional fields + referral request (safe fallback)
+        const userId = signUpData?.user?.id;
+        if (userId) {
+          try {
+            const cleanPatch = {
+              phone: phone.trim() || null,
+              postal_code: postal.trim() || null,
+              city: city.trim() || null,
+            };
+
+            await supabase.from('profiles').update(cleanPatch).eq('id', userId);
+
+            const normalizedCode = (refCode || '').trim().toUpperCase();
+            if (normalizedCode) {
+              const { data: referralData, error: referralError } = await supabase.functions.invoke('apply-referral', {
+                body: {
+                  newUserId: userId,
+                  referralCode: normalizedCode,
+                },
+              });
+
+              if (referralError) {
+                console.warn('[Auth] apply-referral failed:', referralError.message);
+                referralNotice = getUserFacingError(referralError, 'Le code parrain n’a pas pu être appliqué maintenant.');
+              } else if (!referralData?.ok) {
+                referralNotice = getUserFacingError(referralData?.error, 'Le code parrain n’a pas pu être appliqué maintenant.');
+              } else if (referralData?.data?.applied === false) {
+                referralNotice = getUserFacingError(referralData?.data?.reason, 'Le code parrain n’a pas pu être appliqué maintenant.');
+              }
+            }
+          } catch (enrichmentError) {
+            console.warn('[Auth] profile enrichment skipped:', enrichmentError?.message || 'unknown_error');
+          }
+        }
+
         Alert.alert(
           '📧 Vérifie ton email',
-          `Un lien de confirmation a été envoyé à ${email}. Ouvre ta boîte mail et clique sur le lien.`,
+          `Un lien de confirmation a été envoyé à ${cleanEmail}. Ouvre ta boîte mail et clique sur le lien.${referralNotice ? `
+
+🎁 Code parrainage: ${referralNotice}` : ''}`,
           [{ text: 'OK' }]
         );
       } else {
-        await auth.signIn(email, password);
+        await auth.signIn(cleanEmail, cleanPassword);
         // La navigation se fait automatiquement via le listener auth dans App.js
       }
     } catch (err) {
-      setError(err.message || 'Une erreur est survenue.');
+      setError(getUserFacingError(err, 'Impossible de continuer pour le moment.'));
     } finally {
       setLoading(false);
     }
@@ -177,9 +221,9 @@ export default function AuthScreen({ navigation }) {
             onPress={async () => {
               if (!email.includes('@')) { Alert.alert('Entre ton email d\'abord'); return; }
               try {
-                await auth.resetPassword(email);
-                Alert.alert('Email envoyé', 'Vérifie ta boîte mail pour réinitialiser.');
-              } catch (e) { Alert.alert('Erreur', e.message); }
+                await auth.resetPassword(email.trim().toLowerCase());
+                Alert.alert('Email envoyé', 'Vérifie ta boîte mail pour réinitialiser ton mot de passe.');
+              } catch (e) { Alert.alert('Erreur', getUserFacingError(e, 'Impossible d’envoyer l’email de réinitialisation pour le moment.')); }
             }}
             style={{ marginTop: 12, alignItems: 'center' }}
           >
