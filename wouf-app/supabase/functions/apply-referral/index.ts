@@ -1,12 +1,33 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { resolveReferralTier } from '../_shared/monetization.ts';
 import { getServiceRoleKey, getSupabaseUrl } from '../_shared/serverEnv.ts';
+
+type ApplyReferralResult = {
+  applied: boolean;
+  reason: string | null;
+  referral_count: number | null;
+  founder_status: string | null;
+  beta_priority_score: number | null;
+  tier_label: string | null;
+};
 
 function json(status: number, body: Record<string, unknown>) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { 'Content-Type': 'application/json' },
   });
+}
+
+function mapRpcError(message: string | undefined) {
+  switch (message) {
+    case 'new_user_profile_not_found':
+      return { status: 404, error: 'new_user_profile_not_found' };
+    case 'referral_code_not_found':
+      return { status: 404, error: 'referral_code_not_found' };
+    case 'self_referral_not_allowed':
+      return { status: 400, error: 'self_referral_not_allowed' };
+    default:
+      return null;
+  }
 }
 
 Deno.serve(async (req) => {
@@ -28,65 +49,47 @@ Deno.serve(async (req) => {
 
     if (!newUserId || !referralCode) return json(400, { ok: false, error: 'invalid_payload' });
 
-    const { data: newUserProfile, error: newUserError } = await admin
-      .from('profiles')
-      .select('id, referred_by')
-      .eq('id', newUserId)
-      .maybeSingle();
+    const rpcResponse = await admin
+      .rpc('apply_referral_code', {
+        p_new_user_id: newUserId,
+        p_referral_code: referralCode,
+      })
+      .single();
 
-    if (newUserError || !newUserProfile) return json(404, { ok: false, error: 'new_user_profile_not_found' });
+    const data = rpcResponse.data as ApplyReferralResult | null;
+    const { error } = rpcResponse;
 
-    if (newUserProfile.referred_by) {
-      return json(200, { ok: true, data: { applied: false, reason: 'already_referred' } });
+    if (error) {
+      const mappedError = mapRpcError(error.message);
+      if (mappedError) return json(mappedError.status, { ok: false, error: mappedError.error });
+
+      console.error('[apply-referral] rpc failed', error.message);
+      return json(500, { ok: false, error: 'apply_referral_failed' });
     }
 
-    const { data: referrer, error: refError } = await admin
-      .from('profiles')
-      .select('id, referral_code, referral_count')
-      .eq('referral_code', referralCode)
-      .maybeSingle();
-
-    if (refError || !referrer) return json(404, { ok: false, error: 'referral_code_not_found' });
-    if (referrer.id === newUserId) return json(400, { ok: false, error: 'self_referral_not_allowed' });
-
-    const nextCount = Number(referrer.referral_count || 0) + 1;
-    const tier = resolveReferralTier(nextCount);
-
-    const { error: referrerUpdateError } = await admin
-      .from('profiles')
-      .update({
-        referral_count: nextCount,
-        founder_status: tier.founder_status,
-        beta_priority_score: tier.beta_priority_score,
-      })
-      .eq('id', referrer.id);
-
-    if (referrerUpdateError) {
-      console.error('[apply-referral] referrer update failed', referrerUpdateError.message);
-      return json(500, { ok: false, error: 'referrer_update_failed' });
+    if (!data) {
+      console.error('[apply-referral] rpc returned no payload');
+      return json(500, { ok: false, error: 'apply_referral_failed' });
     }
 
-    const { error: newUserUpdateError } = await admin
-      .from('profiles')
-      .update({
-        referred_by: referralCode,
-      })
-      .eq('id', newUserId)
-      .is('referred_by', null);
-
-    if (newUserUpdateError) {
-      console.error('[apply-referral] new user update failed', newUserUpdateError.message);
-      return json(500, { ok: false, error: 'new_user_update_failed' });
+    if (!data.applied) {
+      return json(200, {
+        ok: true,
+        data: {
+          applied: false,
+          reason: data.reason || 'already_referred',
+        },
+      });
     }
 
     return json(200, {
       ok: true,
       data: {
         applied: true,
-        referral_count: nextCount,
-        founder_status: tier.founder_status,
-        beta_priority_score: tier.beta_priority_score,
-        tier_label: tier.label,
+        referral_count: data.referral_count,
+        founder_status: data.founder_status,
+        beta_priority_score: data.beta_priority_score,
+        tier_label: data.tier_label,
       },
     });
   } catch (error) {
