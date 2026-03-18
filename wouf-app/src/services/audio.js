@@ -7,6 +7,7 @@
  */
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system';
+import { supabase } from '../config/supabase';
 
 const REC_OPT = {
   isMeteringEnabled: true,
@@ -48,7 +49,28 @@ class AudioService {
     return { uri, duration: DUR, ...this._analyze(this.data) };
   }
 
-  async cancel() { this.active = false; if (this.interval) { clearInterval(this.interval); this.interval = null; } if (this.rec) { try { await this.rec.stopAndUnloadAsync(); } catch {} this.rec = null; } }
+  async cancel() {
+    this.active = false;
+    if (this.interval) { clearInterval(this.interval); this.interval = null; }
+    if (this.rec) {
+      try { await this.rec.stopAndUnloadAsync(); } catch {}
+      this.rec = null;
+    }
+    try { await Audio.setAudioModeAsync({ allowsRecordingIOS: false }); } catch {}
+  }
+
+  getMetadata(result) {
+    if (!result) return null;
+    return {
+      duration: result.duration ?? null,
+      isBark: Boolean(result.isBark),
+      detectionType: result.detectionType || 'uncertain',
+      confidence: result.confidence ?? null,
+      audioSignature: result.audioSignature || null,
+      details: result.details || null,
+      aiVerified: Boolean(result.aiVerified),
+    };
+  }
 
   // ═══ COUCHE 1+2: ANALYSE LOCALE ══════════════════════════
 
@@ -157,41 +179,52 @@ class AudioService {
 
   // ═══ COUCHE 3: VÉRIFICATION IA (audio réel) ══════════════
 
-  async verifyWithAI(result, audioUri, apiKey) {
-    if (!apiKey || !result.needsAI) return result;
+  async verifyWithAI(result, audioUri) {
+    if (!result?.needsAI) return result;
     try {
-      console.log('[Audio] AI check triggered (conf=' + result.confidence + '%)');
       const b64 = await FileSystem.readAsStringAsync(audioUri, { encoding: FileSystem.EncodingType.Base64 });
-      const d = result.details;
-      const resp = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-        body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 200, messages: [{ role: 'user', content: [
-          { type: 'text', text: `Expert acoustique animale. Écoute cet audio et classifie-le.
-
-PRÉ-ANALYSE LOCALE: ${result.detectionType} (${result.confidence}%)
-Scores: bark=${d.scores.bark}, human=${d.scores.human_voice}, fake=${d.scores.fake}, ambient=${d.scores.ambient}
-Bursts: ${d.burstCount} (moy ${d.avgBurstMs}ms), Vol: moy=${d.avgVol}% max=${d.maxVol}% std=${d.std}
-Régularité: intervalles=${d.intReg}% volumes=${d.volReg}%
-Ramp-up: ${d.ramp?'OUI':'NON'}, Respiration: ${d.breath?'OUI':'NON'}, Phonèmes: ${d.phonemes?'OUI':'NON'}
-
-CRITÈRES:
-- VRAI ABOIEMENT: bursts 80-900ms, onset brutal, silence entre, variabilité naturelle entre chaque aboiement
-- VOIX HUMAINE: flux continu >1.2s, modulation douce de pitch, pas de silence net entre les sons, phonèmes détectables
-- FAKE/IMITATION: humain qui dit "ouaf/wouf" — intervalles trop réguliers (>82%), volumes quasi-identiques (>88%), montée progressive, respiration entre les sons, chaque burst trop long (>600ms)
-- AMBIENT: bruit constant sans pics
-
-JSON STRICT: {"type":"bark|human_voice|fake|ambient","confidence":80,"reason":"1 phrase FR"}` },
-          { type: 'document', source: { type: 'base64', media_type: 'audio/mp4', data: b64 } }
-        ] }] }),
+      const { data, error } = await supabase.functions.invoke('verify-audio', {
+        body: {
+          audioBase64: b64,
+          audioMimeType: 'audio/mp4',
+          baseline: {
+            detectionType: result.detectionType,
+            confidence: result.confidence,
+            reason: result.reason,
+            details: result.details || null,
+          },
+        },
       });
-      if (!resp.ok) return result;
-      const json = await resp.json();
-      const txt = json.content?.map(b => b.type === 'text' ? b.text : '').join('') || '';
-      const ai = JSON.parse(txt.replace(/```json|```/g, '').trim());
-      const fc = Math.round(ai.confidence * 0.65 + result.confidence * 0.35);
-      console.log(`[Audio] AI: ${ai.type} (${ai.confidence}%) → Final: ${ai.type} (${fc}%)`);
-      return { ...result, isBark: ai.type === 'bark', detectionType: ai.type, confidence: fc, reason: ai.reason || result.reason, aiVerified: true, aiResult: ai };
-    } catch (e) { console.warn('[Audio] AI failed:', e.message); return result; }
+
+      if (error || !data?.ok || !data?.data) {
+        console.warn('[Audio] verify-audio edge function failed');
+        return result;
+      }
+
+      const ai = data.data;
+      const typeMap = {
+        bark: 'bark',
+        non_bark: result.detectionType === 'bark' ? 'ambient' : result.detectionType,
+        uncertain: result.detectionType,
+      };
+
+      const mappedType = typeMap[ai.classification] || result.detectionType;
+      const isBark = ai.classification === 'bark';
+      const fc = Math.round((Number(ai.confidence) || result.confidence) * 0.65 + result.confidence * 0.35);
+
+      return {
+        ...result,
+        isBark,
+        detectionType: mappedType,
+        confidence: fc,
+        reason: ai.reason || result.reason,
+        aiVerified: true,
+        aiResult: ai,
+      };
+    } catch (e) {
+      console.warn('[Audio] verify-audio failed:', e?.message || 'unknown_error');
+      return result;
+    }
   }
 
   // ═══ HELPERS ═════════════════════════════════════════════

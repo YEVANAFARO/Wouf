@@ -61,14 +61,32 @@ export default function HomeScreen({ navigation }) {
         </View>
       </View>
 
+
+      {/* Plan + referral quick status */}
+      <View style={{ backgroundColor: colors.bg2, borderRadius: 14, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: colors.bd }}>
+        <Text style={{ fontSize: 10, color: colors.ts }}>Plan actif</Text>
+        <Text style={{ fontSize: 13, fontWeight: '800', color: colors.tx, marginTop: 2 }}>
+          {(profile?.plan || 'free').toUpperCase()}
+        </Text>
+        <Text style={{ fontSize: 10, color: colors.ts, marginTop: 4 }}>
+          Parrainages: {profile?.referral_count || 0} · Code: {profile?.referral_code || 'génération...'}
+        </Text>
+      </View>
+
+      {/* Shop teaser */}
+      <View style={{ backgroundColor: colors.bg2, borderRadius: 14, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: colors.g + '40' }}>
+        <Text style={{ fontSize: 10, fontWeight: '700', color: colors.g }}>🛍️ SHOP WOUF</Text>
+        <Text style={{ fontSize: 12, color: colors.tx, marginTop: 4 }}>À venir — récompenses, perks fondateurs et contenus premium.</Text>
+      </View>
+
       {/* Scan button */}
       <View style={{ alignItems: 'center', marginVertical: 20 }}>
-        <TouchableOpacity onPress={() => navigation.navigate('Scan')}
+        <TouchableOpacity onPress={() => activeDog ? navigation.navigate('Scan') : navigation.navigate('AddDog')}
           style={{ width: 100, height: 100, borderRadius: 50, backgroundColor: colors.p,
-            justifyContent: 'center', alignItems: 'center' }}>
+            justifyContent: 'center', alignItems: 'center', opacity: activeDog ? 1 : 0.6 }}>
           <Text style={{ fontSize: 38 }}>🎙️</Text>
         </TouchableOpacity>
-        <Text style={{ fontSize: 13, fontWeight: '700', color: colors.tx, marginTop: 14 }}>Scanner un aboiement</Text>
+        <Text style={{ fontSize: 13, fontWeight: '700', color: colors.tx, marginTop: 14 }}>{activeDog ? 'Scanner un aboiement' : 'Ajouter un chien pour scanner'}</Text>
       </View>
 
       {/* Tip */}

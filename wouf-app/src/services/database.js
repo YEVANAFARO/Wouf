@@ -7,6 +7,343 @@
  */
 
 import { supabase } from '../config/supabase';
+import { FEEDBACK_EVENT_MAPPING, RECURRING_PATTERN_MAPPING, recordUserFeedbackEvent, refreshRecurringPatternsForDog } from './learning';
+
+export const SCAN_PERSISTENCE_MAPPING = {
+  scans: {
+    mode: 'scanData.mode',
+    bark_detected: 'scanData.isBark',
+    detection_type: 'scanData.detectionType',
+    context_json: 'scanData.context',
+    body_json: 'scanData.bodyLanguage',
+    top_hypothesis: 'scanData.topHypothesis || scanData.hypotheses[0].category',
+    hypotheses_json: 'scanData.hypotheses',
+    confidence_top: 'scanData.confidenceTop || scanData.hypotheses[0].confidence',
+    vet_flag: 'scanData.vetFlag',
+    audio_duration: 'scanData.audioDuration',
+    audio_peak_freq: 'scanData.audioSignature.peakFreq',
+    audio_volume: 'scanData.audioSignature.volume',
+    audio_bands: 'scanData.audioSignature.bands',
+  },
+  scan_features: {
+    peak_freq: 'scanData.audioSignature.peakFreq',
+    rms_energy: 'scanData.audioSignature.volume',
+    low_band_energy: 'scanData.audioSignature.bands.low',
+    mid_band_energy: 'scanData.audioSignature.bands.mid',
+    high_band_energy: 'scanData.audioSignature.bands.high',
+    bark_rate: 'scanData.audioDetails.modRate',
+    burst_count: 'scanData.audioSignature.burstCount',
+  },
+};
+
+export const LEARNING_PERSISTENCE_MAPPING = {
+  user_feedback_events: FEEDBACK_EVENT_MAPPING,
+  recurring_patterns: RECURRING_PATTERN_MAPPING,
+};
+
+async function getAuthenticatedUser({ allowNull = false } = {}) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user && !allowNull) throw new Error('Not authenticated');
+  return user || null;
+}
+
+function createEmptyCartographyStats() {
+  return {
+    total: 0,
+    validatedCount: 0,
+    correctedCount: 0,
+    hasEnoughHistory: false,
+    probableStates: [],
+    validatedStates: [],
+    hours: Array(24).fill(0),
+    triggers: [],
+    topContexts: [],
+    days: Array(7).fill(0),
+    recurring: [],
+    latestAdvice: null,
+    latestPattern: null,
+    latestNote: 'Pas encore assez de scans pour afficher une cartographie utile.',
+  };
+}
+
+function buildScansInsertPayload(userId, scanData, now) {
+  const topHypothesis = scanData.topHypothesis || scanData.hypotheses?.[0]?.category || null;
+  const confidenceTop = scanData.confidenceTop ?? scanData.hypotheses?.[0]?.confidence ?? null;
+
+  return {
+    user_id: userId,
+    dog_id: scanData.dogId,
+
+    // Legacy-compatible fields
+    audio_duration_ms: scanData.audioDuration ?? null,
+    audio_peak_freq: scanData.audioSignature?.peakFreq ?? null,
+    audio_volume: scanData.audioSignature?.volume ?? null,
+    audio_bands: scanData.audioSignature?.bands ?? null,
+    is_bark: Boolean(scanData.isBark),
+    detection_type: scanData.detectionType || (scanData.isBark ? 'bark' : 'non_bark'),
+    scan_mode: scanData.mode || 'quick',
+    context: scanData.context || {},
+    body_language: scanData.bodyLanguage || {},
+    hypotheses: scanData.hypotheses || [],
+    ai_advice: scanData.aiAdvice || null,
+    cartography_note: scanData.cartographyNote || null,
+    recurring_pattern: scanData.recurringPattern || null,
+    raw_ai_response: scanData.rawAiResponse || null,
+    scanned_at: now.toISOString(),
+    hour_of_day: now.getHours(),
+
+    // V2 fields
+    mode: scanData.mode || 'quick',
+    audio_url: scanData.audioUrl || null,
+    audio_duration: scanData.audioDuration ?? null,
+    bark_detected: Boolean(scanData.isBark),
+    context_json: scanData.context || {},
+    body_json: scanData.bodyLanguage || {},
+    top_hypothesis: topHypothesis,
+    hypotheses_json: scanData.hypotheses || [],
+    selected_hypothesis: scanData.selectedHypothesis || null,
+    validated_hypothesis: Number.isInteger(scanData.validatedHypothesis) ? scanData.validatedHypothesis : null,
+    confidence_top: confidenceTop,
+    vet_flag: Boolean(scanData.vetFlag),
+    corrected_label: scanData.correctedLabel || null,
+    correction_text: scanData.correctionText || null,
+    correction_emotion: scanData.correctionEmotion || null,
+    validated: Boolean(scanData.validated || false),
+  };
+}
+
+function buildScanFeaturesInsertPayload(scanId, scanData) {
+  if (!scanData?.audioSignature) return null;
+
+  return {
+    scan_id: scanId,
+    dog_id: scanData.dogId,
+    peak_freq: scanData.audioSignature?.peakFreq ?? null,
+    spectral_centroid: scanData.audioDetails?.spectralCentroid ?? null,
+    spectral_rolloff: scanData.audioDetails?.spectralRolloff ?? null,
+    rms_energy: scanData.audioSignature?.volume ?? null,
+    zcr: scanData.audioDetails?.zcr ?? null,
+    low_band_energy: scanData.audioSignature?.bands?.low ?? null,
+    mid_band_energy: scanData.audioSignature?.bands?.mid ?? null,
+    high_band_energy: scanData.audioSignature?.bands?.high ?? null,
+    bark_rate: scanData.audioDetails?.modRate ?? null,
+    burst_count: scanData.audioSignature?.burstCount ?? null,
+    mfcc_summary: scanData.audioDetails?.mfccSummary ?? null,
+  };
+}
+
+export const CARTOGRAPHY_DATA_MAPPING = {
+  probable_states: 'scan_state_scores.state_code + score + rank',
+  validated_states: 'scans.validated_hypothesis / corrected_label / correction_emotion',
+  hourly_heatmap: 'scans.hour_of_day',
+  triggers: 'scans.context_json with fallback scans.context',
+  top_contexts: 'scans.context_json/context grouped as recurring combinations',
+  time_evolution: 'scans.scanned_at / scans.created_at aggregated by weekday',
+  recurring_trends: 'recurring_patterns.pattern_type + label + score + source_json',
+};
+
+function buildScanStateScoresPayload(scanId, scanData) {
+  const source = Array.isArray(scanData.scanStateScores)
+    ? scanData.scanStateScores
+    : Array.isArray(scanData.hypotheses)
+      ? scanData.hypotheses.map((h, index) => ({
+          state_code: h.category,
+          score: Number(h.confidence || 0),
+          rank: index + 1,
+          source_breakdown: h.source_breakdown || null,
+        }))
+      : [];
+
+  return source
+    .filter((item) => item?.state_code)
+    .slice(0, 3)
+    .map((item, index) => ({
+      scan_id: scanId,
+      state_code: item.state_code,
+      score: Number(item.score || 0),
+      rank: Number(item.rank || index + 1),
+      source_breakdown: item.source_breakdown || null,
+    }));
+}
+
+const VOICE_PROFILE_FIELDS = [
+  'peak_freq',
+  'spectral_centroid',
+  'spectral_rolloff',
+  'rms_energy',
+  'zcr',
+  'low_band_energy',
+  'mid_band_energy',
+  'high_band_energy',
+  'bark_rate',
+  'burst_count',
+];
+
+export const DOG_VOICE_PROFILE_MAPPING = {
+  sample_count: 'number of exploitable bark scans used in profile',
+  avg_peak_freq: 'rolling average of scan_features.peak_freq',
+  avg_centroid: 'rolling average of scan_features.spectral_centroid',
+  avg_rolloff: 'rolling average of scan_features.spectral_rolloff',
+  avg_rms: 'rolling average of scan_features.rms_energy',
+  avg_zcr: 'rolling average of scan_features.zcr',
+  avg_low_band: 'rolling average of scan_features.low_band_energy',
+  avg_mid_band: 'rolling average of scan_features.mid_band_energy',
+  avg_high_band: 'rolling average of scan_features.high_band_energy',
+  avg_bark_rate: 'rolling average of scan_features.bark_rate',
+  avg_burst_count: 'rolling average of scan_features.burst_count',
+  variance_json: 'simple per-feature running variance (V1)',
+  profile_vector: 'snapshot of aggregated means',
+  reliability_level: 'learning|low|medium|good from sample_count',
+};
+
+function toProfileMetricMap(feature) {
+  return {
+    peak_freq: feature?.peak_freq ?? null,
+    spectral_centroid: feature?.spectral_centroid ?? null,
+    spectral_rolloff: feature?.spectral_rolloff ?? null,
+    rms_energy: feature?.rms_energy ?? null,
+    zcr: feature?.zcr ?? null,
+    low_band_energy: feature?.low_band_energy ?? null,
+    mid_band_energy: feature?.mid_band_energy ?? null,
+    high_band_energy: feature?.high_band_energy ?? null,
+    bark_rate: feature?.bark_rate ?? null,
+    burst_count: feature?.burst_count ?? null,
+  };
+}
+
+function toNumberOrNull(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function getReliabilityLevel(sampleCount) {
+  if (sampleCount < 3) return 'learning';
+  if (sampleCount < 6) return 'low';
+  if (sampleCount < 12) return 'medium';
+  return 'good';
+}
+
+function isExploitableVoiceFeature(scanData, featurePayload) {
+  if (!scanData?.isBark) return false;
+  if (!featurePayload) return false;
+
+  const peak = toNumberOrNull(featurePayload.peak_freq);
+  const rms = toNumberOrNull(featurePayload.rms_energy);
+  const bursts = toNumberOrNull(featurePayload.burst_count);
+
+  if (peak == null || peak <= 0) return false;
+  if (rms == null || rms < 8) return false;
+  if (bursts == null || bursts < 1) return false;
+
+  return true;
+}
+
+function computeSimilarityFromProfile(profile, featurePayload) {
+  if (!profile || !featurePayload || !profile.sample_count || profile.sample_count < 2) {
+    return { similarity: null, confidence: profile?.reliability_level || 'learning', comparedMetrics: 0 };
+  }
+
+  const metrics = [
+    ['peak_freq', 'avg_peak_freq', 1200],
+    ['rms_energy', 'avg_rms', 100],
+    ['low_band_energy', 'avg_low_band', 100],
+    ['mid_band_energy', 'avg_mid_band', 100],
+    ['high_band_energy', 'avg_high_band', 100],
+    ['bark_rate', 'avg_bark_rate', 12],
+    ['burst_count', 'avg_burst_count', 12],
+  ];
+
+  let sum = 0;
+  let compared = 0;
+
+  for (const [scanKey, profileKey, scale] of metrics) {
+    const a = toNumberOrNull(featurePayload[scanKey]);
+    const b = toNumberOrNull(profile[profileKey]);
+    if (a == null || b == null) continue;
+    const distance = Math.abs(a - b) / scale;
+    const score = Math.max(0, 1 - distance);
+    sum += score;
+    compared += 1;
+  }
+
+  if (!compared) return { similarity: null, confidence: profile.reliability_level || 'learning', comparedMetrics: 0 };
+
+  return {
+    similarity: Math.round((sum / compared) * 100),
+    confidence: profile.reliability_level || 'learning',
+    comparedMetrics: compared,
+  };
+}
+
+function buildUpdatedVoiceProfile(profile, featurePayload) {
+  const previousCount = profile?.sample_count || 0;
+  const nextCount = previousCount + 1;
+
+  const previousVariance = profile?.variance_json || {};
+  const currentMetrics = toProfileMetricMap(featurePayload);
+
+  const avgMap = {
+    peak_freq: 'avg_peak_freq',
+    spectral_centroid: 'avg_centroid',
+    spectral_rolloff: 'avg_rolloff',
+    rms_energy: 'avg_rms',
+    zcr: 'avg_zcr',
+    low_band_energy: 'avg_low_band',
+    mid_band_energy: 'avg_mid_band',
+    high_band_energy: 'avg_high_band',
+    bark_rate: 'avg_bark_rate',
+    burst_count: 'avg_burst_count',
+  };
+
+  const patch = {
+    sample_count: nextCount,
+    reliability_level: getReliabilityLevel(nextCount),
+  };
+
+  const nextVariance = { ...previousVariance };
+
+  for (const metric of VOICE_PROFILE_FIELDS) {
+    const value = toNumberOrNull(currentMetrics[metric]);
+    const avgField = avgMap[metric];
+    const prevAvg = toNumberOrNull(profile?.[avgField]);
+
+    if (value == null) {
+      patch[avgField] = prevAvg;
+      continue;
+    }
+
+    const updatedAvg = prevAvg == null
+      ? value
+      : ((prevAvg * previousCount) + value) / nextCount;
+
+    patch[avgField] = Number(updatedAvg.toFixed(4));
+
+    const prevVar = toNumberOrNull(previousVariance[metric]) ?? 0;
+    const delta = prevAvg == null ? 0 : (value - prevAvg);
+    const updatedVar = prevAvg == null
+      ? 0
+      : ((prevVar * previousCount) + (delta * delta)) / nextCount;
+
+    nextVariance[metric] = Number(updatedVar.toFixed(6));
+  }
+
+  patch.variance_json = nextVariance;
+  patch.profile_vector = {
+    avg_peak_freq: patch.avg_peak_freq,
+    avg_centroid: patch.avg_centroid,
+    avg_rolloff: patch.avg_rolloff,
+    avg_rms: patch.avg_rms,
+    avg_zcr: patch.avg_zcr,
+    avg_low_band: patch.avg_low_band,
+    avg_mid_band: patch.avg_mid_band,
+    avg_high_band: patch.avg_high_band,
+    avg_bark_rate: patch.avg_bark_rate,
+    avg_burst_count: patch.avg_burst_count,
+  };
+
+  return patch;
+}
+
 
 // ═══════════════════════════════════════════════════════════
 // PROFILES
@@ -15,7 +352,7 @@ import { supabase } from '../config/supabase';
 export const profileService = {
   /** Récupérer le profil du user connecté */
   async get() {
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getAuthenticatedUser({ allowNull: true });
     if (!user) return null;
     const { data, error } = await supabase
       .from('profiles')
@@ -28,7 +365,7 @@ export const profileService = {
 
   /** Mettre à jour le profil */
   async update(fields) {
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getAuthenticatedUser();
     const { data, error } = await supabase
       .from('profiles')
       .update(fields)
@@ -41,7 +378,8 @@ export const profileService = {
 
   /** Ajouter de l'XP (via fonction SQL) */
   async addXp(amount) {
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getAuthenticatedUser({ allowNull: true });
+    if (!user) return null;
     const { data, error } = await supabase.rpc('add_xp', {
       p_user_id: user.id,
       p_amount: amount,
@@ -52,7 +390,8 @@ export const profileService = {
 
   /** Mettre à jour le streak (via fonction SQL) */
   async updateStreak() {
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getAuthenticatedUser({ allowNull: true });
+    if (!user) return null;
     const { data, error } = await supabase.rpc('update_streak', {
       p_user_id: user.id,
     });
@@ -68,7 +407,8 @@ export const profileService = {
 export const dogService = {
   /** Récupérer tous les chiens du user */
   async getAll() {
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getAuthenticatedUser({ allowNull: true });
+    if (!user) return [];
     const { data, error } = await supabase
       .from('dogs')
       .select('*')
@@ -92,7 +432,7 @@ export const dogService = {
 
   /** Créer un nouveau chien */
   async create(dogData) {
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getAuthenticatedUser();
     const { data, error } = await supabase
       .from('dogs')
       .insert({
@@ -143,7 +483,7 @@ export const dogService = {
 
   /** Upload photo chien vers Supabase Storage */
   async uploadPhoto(dogId, photoUri) {
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getAuthenticatedUser();
     const ext = photoUri.split('.').pop() || 'jpg';
     const path = `${user.id}/${dogId}.${ext}`;
 
@@ -176,12 +516,68 @@ export const dogService = {
 };
 
 // ═══════════════════════════════════════════════════════════
+// DOG VOICE PROFILE (LOT 5)
+// ═══════════════════════════════════════════════════════════
+
+export const dogVoiceProfileService = {
+  async getByDogId(dogId) {
+    const { data, error } = await supabase
+      .from('dog_voice_profile')
+      .select('*')
+      .eq('dog_id', dogId)
+      .maybeSingle();
+    if (error) throw error;
+    return data;
+  },
+
+  async upsertFromScanFeature(dogId, featurePayload, { isBark = false } = {}) {
+    if (!isExploitableVoiceFeature({ isBark }, featurePayload)) {
+      return {
+        updated: false,
+        reason: 'non_exploitable_scan',
+        reliability_level: 'learning',
+        similarity: null,
+      };
+    }
+
+    const existing = await this.getByDogId(dogId);
+    const similarity = computeSimilarityFromProfile(existing, featurePayload);
+
+    const updatedPatch = buildUpdatedVoiceProfile(existing || { sample_count: 0 }, featurePayload);
+
+    const { data, error } = await supabase
+      .from('dog_voice_profile')
+      .upsert({
+        dog_id: dogId,
+        ...updatedPatch,
+      }, { onConflict: 'dog_id' })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('[DB] dog_voice_profile upsert failed', { message: error.message, dogId });
+      throw new Error('dog_voice_profile_persistence_failed');
+    }
+
+    return {
+      updated: true,
+      reliability_level: data.reliability_level,
+      sample_count: data.sample_count,
+      similarity,
+      profile: data,
+    };
+  },
+};
+
+// ═══════════════════════════════════════════════════════════
 // SCANS
 // ═══════════════════════════════════════════════════════════
 
 export const scanService = {
   /** Récupérer les scans d'un chien (paginé) */
   async getForDog(dogId, { limit = 50, offset = 0 } = {}) {
+    if (!dogId) return [];
+
     const { data, error } = await supabase
       .from('scans')
       .select('*')
@@ -203,41 +599,92 @@ export const scanService = {
     return data;
   },
 
-  /** Créer un scan complet (après interprétation IA) */
+  /** Créer un scan complet + scan_features (pipeline LOT 4) */
   async create(scanData) {
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getAuthenticatedUser();
     const now = new Date();
+
+    if (!scanData?.dogId) throw new Error('missing_dog_id');
+    if (!Array.isArray(scanData?.hypotheses) || !scanData.hypotheses.length) throw new Error('missing_hypotheses');
+
+    const scanPayload = buildScansInsertPayload(user.id, scanData, now);
 
     const { data, error } = await supabase
       .from('scans')
-      .insert({
-        user_id: user.id,
-        dog_id: scanData.dogId,
-        audio_duration_ms: scanData.audioDuration,
-        audio_peak_freq: scanData.audioSignature?.peakFreq,
-        audio_volume: scanData.audioSignature?.volume,
-        audio_bands: scanData.audioSignature?.bands,
-        is_bark: scanData.isBark,
-        detection_type: scanData.detectionType,
-        scan_mode: scanData.mode,
-        context: scanData.context,
-        body_language: scanData.bodyLanguage,
-        hypotheses: scanData.hypotheses,
-        cartography_note: scanData.cartographyNote,
-        recurring_pattern: scanData.recurringPattern,
-        ai_advice: scanData.aiAdvice,
-        raw_ai_response: scanData.rawAiResponse,
-        scanned_at: now.toISOString(),
-        hour_of_day: now.getHours(),
-      })
+      .insert(scanPayload)
       .select()
       .single();
-    if (error) throw error;
-    return data;
+
+    if (error) {
+      console.error('[DB] scans insert failed', { message: error.message });
+      throw new Error('scan_persistence_failed');
+    }
+
+    const featurePayload = buildScanFeaturesInsertPayload(data.id, scanData);
+    let voiceProfile = {
+      updated: false,
+      reason: 'no_feature_payload',
+      reliability_level: 'learning',
+      similarity: null,
+    };
+    const warnings = [];
+
+    if (featurePayload) {
+      const { error: featureError } = await supabase
+        .from('scan_features')
+        .insert(featurePayload);
+
+      if (featureError) {
+        console.error('[DB] scan_features insert failed', { message: featureError.message, scanId: data.id });
+        warnings.push('scan_features_persistence_failed');
+      } else {
+        try {
+          voiceProfile = await dogVoiceProfileService.upsertFromScanFeature(scanData.dogId, featurePayload, {
+            isBark: scanData.isBark,
+          });
+        } catch (voiceProfileError) {
+          console.error('[DB] dog_voice_profile update skipped', { message: voiceProfileError.message, scanId: data.id });
+          warnings.push('dog_voice_profile_persistence_failed');
+        }
+      }
+    }
+
+    const stateScoresPayload = buildScanStateScoresPayload(data.id, scanData);
+    if (stateScoresPayload.length) {
+      const { error: scoreError } = await supabase
+        .from('scan_state_scores')
+        .insert(stateScoresPayload);
+
+      if (scoreError) {
+        console.error('[DB] scan_state_scores insert failed', { message: scoreError.message, scanId: data.id });
+        warnings.push('scan_state_scores_persistence_failed');
+      }
+    }
+
+    try {
+      await refreshRecurringPatternsForDog(scanData.dogId);
+    } catch (patternError) {
+      console.warn('[Learning] recurring pattern refresh skipped', patternError?.message || 'unknown_error');
+      warnings.push('recurring_patterns_refresh_skipped');
+    }
+
+    return {
+      ...data,
+      warnings,
+      voice_profile: {
+        reliability_level: voiceProfile.reliability_level,
+        sample_count: voiceProfile.sample_count || null,
+        similarity: voiceProfile.similarity || null,
+        updated: Boolean(voiceProfile.updated),
+        reason: voiceProfile.reason || null,
+      },
+    };
   },
 
-  /** Valider un scan (l'utilisateur confirme l'hypothèse) */
+  /** Valider un scan (l'utilisateur confirme l'hypothèse) + feedback event */
   async validate(scanId, hypothesisIndex) {
+    const user = await getAuthenticatedUser();
+
     const { data, error } = await supabase
       .from('scans')
       .update({
@@ -248,27 +695,65 @@ export const scanService = {
       .select()
       .single();
     if (error) throw error;
+
+    const selectedLabel = data?.hypotheses_json?.[hypothesisIndex]?.category
+      || data?.hypotheses?.[hypothesisIndex]?.category
+      || data?.selected_hypothesis
+      || data?.top_hypothesis
+      || null;
+
+    try {
+      await recordUserFeedbackEvent({
+        scanId,
+        userId: user.id,
+        feedbackType: 'validate',
+        selectedLabel,
+      });
+      await refreshRecurringPatternsForDog(data.dog_id);
+    } catch (learnError) {
+      console.warn('[Learning] validate feedback persistence skipped', learnError?.message || 'unknown_error');
+    }
+
     return data;
   },
 
-  /** Corriger un scan */
+  /** Corriger un scan + feedback event */
   async correct(scanId, correctionText, correctionEmotion) {
+    const user = await getAuthenticatedUser();
+
     const { data, error } = await supabase
       .from('scans')
       .update({
         correction: true,
         correction_text: correctionText,
         correction_emotion: correctionEmotion,
+        corrected_label: correctionEmotion,
       })
       .eq('id', scanId)
       .select()
       .single();
     if (error) throw error;
+
+    try {
+      await recordUserFeedbackEvent({
+        scanId,
+        userId: user.id,
+        feedbackType: 'correct',
+        selectedLabel: correctionEmotion || null,
+        freeText: correctionText || null,
+      });
+      await refreshRecurringPatternsForDog(data.dog_id);
+    } catch (learnError) {
+      console.warn('[Learning] correction feedback persistence skipped', learnError?.message || 'unknown_error');
+    }
+
     return data;
   },
 
-  /** Compteur de scans aujourd'hui (pour la limite free) */
+  /** Compteur de scans aujourd'hui pour un chien */
   async countToday(dogId) {
+    if (!dogId) return 0;
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const { count, error } = await supabase
@@ -280,51 +765,123 @@ export const scanService = {
     return count || 0;
   },
 
-  /** Stats pour la cartographie */
+  /** Compteur de scans aujourd'hui pour l'utilisateur connecté */
+  async countTodayForUser() {
+    const user = await getAuthenticatedUser({ allowNull: true });
+    if (!user) return 0;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const { count, error } = await supabase
+      .from('scans')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', user.id)
+      .gte('scanned_at', today.toISOString());
+
+    if (error) throw error;
+    return count || 0;
+  },
+
+  /** Stats pour la cartographie V1 */
   async getStats(dogId) {
+    if (!dogId) return createEmptyCartographyStats();
+
     const scans = await this.getForDog(dogId, { limit: 200 });
 
-    // Émotions
-    const emotions = {};
+    const { data: stateScores, error: stateScoresError } = await supabase
+      .from('scan_state_scores')
+      .select('scan_id, state_code, score, rank, source_breakdown')
+      .in('scan_id', scans.map(s => s.id).length ? scans.map(s => s.id) : ['00000000-0000-0000-0000-000000000000']);
+    if (stateScoresError) throw stateScoresError;
+
+    const { data: recurringPatterns, error: recurringPatternsError } = await supabase
+      .from('recurring_patterns')
+      .select('pattern_type, label, score, source_json, updated_at')
+      .eq('dog_id', dogId)
+      .order('updated_at', { ascending: false });
+    if (recurringPatternsError) throw recurringPatternsError;
+
+    const probableStates = {};
+    const validatedStates = {};
     const hours = Array(24).fill(0);
     const triggers = {};
+    const contexts = {};
     const days = Array(7).fill(0);
     let validatedCount = 0;
+    let correctedCount = 0;
 
-    scans.forEach(s => {
-      // Émotion principale
-      const emotion = s.correction
-        ? s.correction_emotion
-        : s.hypotheses?.[s.validated_hypothesis || 0]?.category || '?';
-      emotions[emotion] = (emotions[emotion] || 0) + 1;
+    (stateScores || []).forEach((row) => {
+      if (!row?.state_code) return;
+      probableStates[row.state_code] = (probableStates[row.state_code] || 0) + Number(row.score || 0);
+    });
 
-      // Horaire
-      if (s.hour_of_day != null) hours[s.hour_of_day]++;
+    scans.forEach((s) => {
+      const resolvedState = s.corrected_label
+        || s.correction_emotion
+        || s.selected_hypothesis
+        || (Array.isArray(s.hypotheses_json) ? s.hypotheses_json[s.validated_hypothesis || 0]?.category : null)
+        || (Array.isArray(s.hypotheses) ? s.hypotheses[s.validated_hypothesis || 0]?.category : null)
+        || s.top_hypothesis
+        || '?';
 
-      // Déclencheurs
-      if (s.context) {
-        Object.entries(s.context).forEach(([k, v]) => {
-          if (v) triggers[k] = (triggers[k] || 0) + 1;
-        });
+      if (s.validated || s.correction || s.corrected_label) {
+        validatedStates[resolvedState] = (validatedStates[resolvedState] || 0) + 1;
       }
 
-      // Jours de la semaine
-      days[new Date(s.scanned_at).getDay()]++;
+      if (s.hour_of_day != null && s.hour_of_day >= 0 && s.hour_of_day < 24) hours[s.hour_of_day]++;
 
+      const ctx = s.context_json || s.context || {};
+      const activeContextKeys = Object.entries(ctx)
+        .filter(([, v]) => Boolean(v))
+        .map(([k]) => k);
+
+      activeContextKeys.forEach((key) => {
+        triggers[key] = (triggers[key] || 0) + 1;
+      });
+
+      if (activeContextKeys.length) {
+        const contextLabel = activeContextKeys
+          .sort((a, b) => a.localeCompare(b))
+          .slice(0, 3)
+          .join(' + ');
+        contexts[contextLabel] = (contexts[contextLabel] || 0) + 1;
+      }
+
+      const refDate = s.scanned_at || s.created_at;
+      if (refDate) days[new Date(refDate).getDay()]++;
       if (s.validated) validatedCount++;
+      if (s.correction || s.corrected_label) correctedCount++;
     });
+
+    const recurring = (recurringPatterns || []).map((p) => ({
+      type: p.pattern_type,
+      label: p.label,
+      score: Number(p.score || 0),
+      source: p.source_json || {},
+    }));
 
     return {
       total: scans.length,
       validatedCount,
-      correctedCount: scans.filter(s => s.correction).length,
-      emotions: Object.entries(emotions).sort((a, b) => b[1] - a[1]),
+      correctedCount,
+      hasEnoughHistory: scans.length >= 5,
+      probableStates: Object.entries(probableStates)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5),
+      validatedStates: Object.entries(validatedStates)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5),
       hours,
       triggers: Object.entries(triggers).sort((a, b) => b[1] - a[1]).slice(0, 5),
+      topContexts: Object.entries(contexts).sort((a, b) => b[1] - a[1]).slice(0, 5),
       days,
+      recurring,
       latestAdvice: scans.find(s => s.ai_advice)?.ai_advice || null,
-      latestPattern: scans.find(s => s.recurring_pattern)?.recurring_pattern || null,
-      latestNote: scans.find(s => s.cartography_note)?.cartography_note || null,
+      latestPattern: recurring[0]?.label || null,
+      latestNote: scans.length >= 5
+        ? 'Lecture probabiliste basée sur les scans enregistrés, validations et répétitions observées.'
+        : 'Historique encore léger : la cartographie reste indicative et va gagner en fiabilité avec plus de scans.',
     };
   },
 };
@@ -335,7 +892,8 @@ export const scanService = {
 
 export const notifService = {
   async getAll() {
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getAuthenticatedUser({ allowNull: true });
+    if (!user) return [];
     const { data, error } = await supabase
       .from('notifications')
       .select('*')
@@ -351,7 +909,8 @@ export const notifService = {
   },
 
   async markAllRead() {
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getAuthenticatedUser({ allowNull: true });
+    if (!user) return;
     await supabase
       .from('notifications')
       .update({ read: true })
@@ -360,7 +919,7 @@ export const notifService = {
   },
 
   async create(title, body, type = 'info') {
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getAuthenticatedUser();
     const { error } = await supabase.from('notifications').insert({
       user_id: user.id,
       title,
@@ -378,8 +937,7 @@ export const notifService = {
 export const dataService = {
   /** Supprimer TOUTES les données d'un user (RGPD) */
   async deleteAllUserData() {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) throw new Error('Not authenticated');
+    const user = await getAuthenticatedUser();
 
     // Ordre: scans → notifications → dogs → profile
     // Le CASCADE dans le schema fait le gros du travail
