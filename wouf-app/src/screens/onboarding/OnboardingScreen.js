@@ -14,13 +14,13 @@ const { width } = Dimensions.get('window');
 const PAGES = [
   {
     emoji: '🎙️',
-    title: 'Ton chien parle.\nTu ne l'entends pas… encore.',
-    body: 'Chaque aboiement est un message. WOUF capte le son, analyse son spectre et le transforme en émotion identifiable. Tu vas enfin comprendre ce qu'il essaie de te dire.',
+    title: "Ton chien parle.\nTu ne l'entends pas… encore.",
+    body: "Chaque aboiement est un message. WOUF capte le son, analyse son spectre et le transforme en émotion identifiable. Tu vas enfin comprendre ce qu'il essaie de te dire.",
   },
   {
     emoji: '🧠',
     title: 'Une IA qui connaît\nTON chien',
-    body: 'WOUF croise le profil unique de ton chien, le contexte de l'aboiement et son langage corporel pour te donner 3 hypothèses classées par confiance. Plus tu utilises WOUF, plus il devient précis.',
+    body: "WOUF croise le profil unique de ton chien, le contexte de l'aboiement et son langage corporel pour te donner 3 hypothèses classées par confiance. Plus tu utilises WOUF, plus il devient précis.",
   },
   {
     emoji: '🧬',
@@ -30,12 +30,12 @@ const PAGES = [
   {
     emoji: '🗺️',
     title: 'La carte émotionnelle\nde ton chien',
-    body: 'Quand aboie-t-il le plus ? Pourquoi ? Quels déclencheurs reviennent ? WOUF construit une cartographie complète pour t'aider à anticiper et agir.',
+    body: "Quand aboie-t-il le plus ? Pourquoi ? Quels déclencheurs reviennent ? WOUF construit une cartographie complète pour t'aider à anticiper et agir.",
   },
   {
     emoji: '🏆',
     title: 'Joue, progresse,\ndébloque',
-    body: 'Chaque scan te rapporte de l'XP, des pièces et des récompenses. Missions quotidiennes, coffres, réductions partenaires… Plus tu comprends ton chien, plus tu gagnes !',
+    body: "Chaque scan te rapporte de l'XP, des pièces et des récompenses. Missions quotidiennes, coffres, réductions partenaires… Plus tu comprends ton chien, plus tu gagnes !",
   },
 ];
 
