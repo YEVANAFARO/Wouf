@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useContext, useCallback } from 'react';
 import { View, Text, ScrollView, TouchableOpacity } from 'react-native';
-import { ThemeContext, DogsContext } from '../../../App';
+import { ThemeContext, DogsContext } from '../../context/appContexts';
 import { scanService } from '../../services/database';
 import { getUserFacingError } from '../../services/userFacingErrors';
 

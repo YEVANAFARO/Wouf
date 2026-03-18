@@ -9,7 +9,7 @@
 import React, { useState, useContext, useRef } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, Image, Alert } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import { ThemeContext, DogsContext } from '../../../App';
+import { ThemeContext, DogsContext } from '../../context/appContexts';
 import { dogService, profileService } from '../../services/database';
 import { BREEDS, PERSONALITIES, TRIGGERS, HEALTH_SIGNS, PHYSICAL_SPECS, ACTIVITIES, SIZES } from '../../config/constants';
 import { getUserFacingError } from '../../services/userFacingErrors';

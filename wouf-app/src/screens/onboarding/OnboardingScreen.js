@@ -7,7 +7,7 @@
 
 import React, { useState, useEffect, useRef, useContext } from 'react';
 import { View, Text, TouchableOpacity, Dimensions, Animated } from 'react-native';
-import { ThemeContext } from '../../../App';
+import { ThemeContext } from '../../context/appContexts';
 
 const { width } = Dimensions.get('window');
 

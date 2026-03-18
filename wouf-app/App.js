@@ -4,7 +4,7 @@
  * Navigation + Auth state management + Theme
  */
 
-import React, { useState, useEffect, useCallback, createContext, useContext } from 'react';
+import React, { useState, useEffect, useCallback, useContext } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -12,6 +12,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { View, Text, ActivityIndicator } from 'react-native';
 import { supabase, auth } from './src/config/supabase';
 import { DARK, LIGHT } from './src/config/theme';
+import { ThemeContext, AuthContext, DogsContext } from './src/context/appContexts';
 import { profileService } from './src/services/database';
 
 // ── Screens ────────────────────────────────────────────────
@@ -24,11 +25,6 @@ import ScanDetailScreen from './src/screens/library/ScanDetailScreen';
 import CartographyScreen from './src/screens/cartography/CartographyScreen';
 import ProfileScreen from './src/screens/profile/ProfileScreen';
 import ScanFlowScreen from './src/screens/scan/ScanFlowScreen';
-
-// ── Contexts ───────────────────────────────────────────────
-export const ThemeContext = createContext({ theme: 'dark', colors: DARK, toggle: () => {} });
-export const AuthContext = createContext({ user: null, profile: null, refresh: () => {} });
-export const DogsContext = createContext({ dogs: [], activeDog: null, setActiveDog: () => {} });
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();

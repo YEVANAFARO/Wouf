@@ -1,6 +1,6 @@
 import React, { useContext } from 'react';
 import { View, Text, ScrollView, TouchableOpacity } from 'react-native';
-import { ThemeContext } from '../../../App';
+import { ThemeContext } from '../../context/appContexts';
 
 export default function ScanDetailScreen({ route, navigation }) {
   const { colors } = useContext(ThemeContext);

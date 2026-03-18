@@ -13,7 +13,7 @@ import React, { useState, useContext } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView, Alert, KeyboardAvoidingView, Platform,
 } from 'react-native';
-import { ThemeContext } from '../../../App';
+import { ThemeContext } from '../../context/appContexts';
 import { auth, supabase } from '../../config/supabase';
 import { getUserFacingError } from '../../services/userFacingErrors';
 

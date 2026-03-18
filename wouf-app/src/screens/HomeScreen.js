@@ -1,7 +1,7 @@
 // src/screens/HomeScreen.js — PLACEHOLDER (à développer)
 import React, { useContext } from 'react';
 import { View, Text, TouchableOpacity, ScrollView } from 'react-native';
-import { ThemeContext, AuthContext, DogsContext } from '../../App';
+import { ThemeContext, AuthContext, DogsContext } from '../context/appContexts';
 import { DAILY_TIPS } from '../config/constants';
 
 export default function HomeScreen({ navigation }) {

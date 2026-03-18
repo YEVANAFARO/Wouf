@@ -1,6 +1,6 @@
 import React, { useContext } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, Alert } from 'react-native';
-import { ThemeContext, AuthContext, DogsContext } from '../../../App';
+import { ThemeContext, AuthContext, DogsContext } from '../../context/appContexts';
 import { auth } from '../../config/supabase';
 import { dataService } from '../../services/database';
 import { REFERRAL_TIERS, resolveReferralTier } from '../../services/monetization';

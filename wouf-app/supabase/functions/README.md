@@ -12,6 +12,7 @@ Current functions:
 - `interpret-scan/` : secure interpretation pipeline (dog/context/body/history/mode/audio metadata)
 - `verify-audio/` : ambiguous bark/non-bark server-side verification
 - `apply-referral/` : referral code application + founder tier update
+- `delete-user/` : authenticated account deletion with server-side cleanup
 
 Shared helpers:
 - `_shared/serverEnv.ts` : server env availability flags

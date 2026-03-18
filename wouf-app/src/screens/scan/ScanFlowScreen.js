@@ -2,7 +2,7 @@
 // Full flow: Mode → Recording → Context → Body → Confirm → Analyzing → Result
 import React, { useState, useContext, useRef, useEffect, useMemo } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, Alert } from 'react-native';
-import { ThemeContext, DogsContext, AuthContext } from '../../../App';
+import { ThemeContext, DogsContext, AuthContext } from '../../context/appContexts';
 import AudioService from '../../services/audio';
 import { interpretBark } from '../../services/ai';
 import { scanService, profileService } from '../../services/database';
