@@ -20,6 +20,82 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- ---------------------------------------------------------------------
+-- Bootstrap compatibility for fresh Supabase projects
+-- ---------------------------------------------------------------------
+-- Create minimal legacy tables first so the V2 ALTER/UPDATE logic below
+-- also works on a brand-new database.
+
+CREATE TABLE IF NOT EXISTS public.profiles (
+  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  referral_code TEXT,
+  referred_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE public.profiles
+  ADD COLUMN IF NOT EXISTS referral_code TEXT,
+  ADD COLUMN IF NOT EXISTS referred_by TEXT,
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+CREATE TABLE IF NOT EXISTS public.dogs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  name TEXT,
+  breed TEXT,
+  mix_breeds TEXT[],
+  birth_year INTEGER,
+  personality TEXT[],
+  triggers TEXT[],
+  health_signs TEXT[],
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE public.dogs
+  ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS name TEXT,
+  ADD COLUMN IF NOT EXISTS breed TEXT,
+  ADD COLUMN IF NOT EXISTS mix_breeds TEXT[],
+  ADD COLUMN IF NOT EXISTS birth_year INTEGER,
+  ADD COLUMN IF NOT EXISTS personality TEXT[],
+  ADD COLUMN IF NOT EXISTS triggers TEXT[],
+  ADD COLUMN IF NOT EXISTS health_signs TEXT[],
+  ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+CREATE TABLE IF NOT EXISTS public.scans (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  dog_id UUID NOT NULL REFERENCES public.dogs(id) ON DELETE CASCADE,
+  scan_mode TEXT NOT NULL DEFAULT 'quick',
+  audio_duration_ms INTEGER,
+  is_bark BOOLEAN NOT NULL DEFAULT TRUE,
+  context JSONB,
+  body_language JSONB,
+  hypotheses JSONB,
+  correction_emotion TEXT,
+  validated_hypothesis INTEGER,
+  validated BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE public.scans
+  ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS dog_id UUID REFERENCES public.dogs(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS scan_mode TEXT NOT NULL DEFAULT 'quick',
+  ADD COLUMN IF NOT EXISTS audio_duration_ms INTEGER,
+  ADD COLUMN IF NOT EXISTS is_bark BOOLEAN NOT NULL DEFAULT TRUE,
+  ADD COLUMN IF NOT EXISTS context JSONB,
+  ADD COLUMN IF NOT EXISTS body_language JSONB,
+  ADD COLUMN IF NOT EXISTS hypotheses JSONB,
+  ADD COLUMN IF NOT EXISTS correction_emotion TEXT,
+  ADD COLUMN IF NOT EXISTS validated_hypothesis INTEGER,
+  ADD COLUMN IF NOT EXISTS validated BOOLEAN NOT NULL DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+-- ---------------------------------------------------------------------
 -- profiles (extend legacy -> V2)
 -- ---------------------------------------------------------------------
 ALTER TABLE public.profiles
