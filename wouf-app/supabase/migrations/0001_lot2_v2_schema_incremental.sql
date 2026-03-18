@@ -27,26 +27,77 @@ $$ LANGUAGE plpgsql;
 
 CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-  referral_code TEXT,
+  email TEXT,
+  phone TEXT,
+  postal_code TEXT,
+  city TEXT,
+  referral_code TEXT UNIQUE DEFAULT ('WOUF-' || substr(md5(random()::text), 1, 6)),
   referred_by TEXT,
+  xp INTEGER NOT NULL DEFAULT 0,
+  level INTEGER NOT NULL DEFAULT 1,
+  streak INTEGER NOT NULL DEFAULT 0,
+  coins INTEGER NOT NULL DEFAULT 0,
+  total_coins_earned INTEGER NOT NULL DEFAULT 0,
+  last_active DATE NOT NULL DEFAULT CURRENT_DATE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 ALTER TABLE public.profiles
+  ADD COLUMN IF NOT EXISTS email TEXT,
+  ADD COLUMN IF NOT EXISTS phone TEXT,
+  ADD COLUMN IF NOT EXISTS postal_code TEXT,
+  ADD COLUMN IF NOT EXISTS city TEXT,
   ADD COLUMN IF NOT EXISTS referral_code TEXT,
   ADD COLUMN IF NOT EXISTS referred_by TEXT,
+  ADD COLUMN IF NOT EXISTS xp INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS level INTEGER NOT NULL DEFAULT 1,
+  ADD COLUMN IF NOT EXISTS streak INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS coins INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS total_coins_earned INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS last_active DATE NOT NULL DEFAULT CURRENT_DATE,
   ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+ALTER TABLE public.profiles
+  ALTER COLUMN referral_code SET DEFAULT ('WOUF-' || substr(md5(random()::text), 1, 6)),
+  ALTER COLUMN xp SET DEFAULT 0,
+  ALTER COLUMN level SET DEFAULT 1,
+  ALTER COLUMN streak SET DEFAULT 0,
+  ALTER COLUMN coins SET DEFAULT 0,
+  ALTER COLUMN total_coins_earned SET DEFAULT 0,
+  ALTER COLUMN last_active SET DEFAULT CURRENT_DATE;
+
+UPDATE public.profiles
+SET referral_code = COALESCE(referral_code, 'WOUF-' || substr(md5(random()::text), 1, 6))
+WHERE referral_code IS NULL;
 
 CREATE TABLE IF NOT EXISTS public.dogs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   name TEXT,
+  photo_url TEXT,
+  sex TEXT,
+  neutered TEXT,
+  birth_mode TEXT,
+  birth_date DATE,
+  birth_year INTEGER,
+  birth_month INTEGER,
+  birth_reminder BOOLEAN NOT NULL DEFAULT TRUE,
+  breed_mode TEXT,
   breed TEXT,
   mix_breeds TEXT[],
-  birth_year INTEGER,
+  size TEXT,
   personality TEXT[],
   triggers TEXT[],
+  physical_specs TEXT[],
+  housing TEXT,
+  garden TEXT,
+  alone_time TEXT,
+  other_animals TEXT,
+  noise_level TEXT,
   health_signs TEXT[],
+  fav_treats TEXT,
+  fav_toys TEXT,
+  fav_activities TEXT[],
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -55,12 +106,30 @@ CREATE TABLE IF NOT EXISTS public.dogs (
 ALTER TABLE public.dogs
   ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
   ADD COLUMN IF NOT EXISTS name TEXT,
+  ADD COLUMN IF NOT EXISTS photo_url TEXT,
+  ADD COLUMN IF NOT EXISTS sex TEXT,
+  ADD COLUMN IF NOT EXISTS neutered TEXT,
+  ADD COLUMN IF NOT EXISTS birth_mode TEXT,
+  ADD COLUMN IF NOT EXISTS birth_date DATE,
+  ADD COLUMN IF NOT EXISTS birth_year INTEGER,
+  ADD COLUMN IF NOT EXISTS birth_month INTEGER,
+  ADD COLUMN IF NOT EXISTS birth_reminder BOOLEAN NOT NULL DEFAULT TRUE,
+  ADD COLUMN IF NOT EXISTS breed_mode TEXT,
   ADD COLUMN IF NOT EXISTS breed TEXT,
   ADD COLUMN IF NOT EXISTS mix_breeds TEXT[],
-  ADD COLUMN IF NOT EXISTS birth_year INTEGER,
+  ADD COLUMN IF NOT EXISTS size TEXT,
   ADD COLUMN IF NOT EXISTS personality TEXT[],
   ADD COLUMN IF NOT EXISTS triggers TEXT[],
+  ADD COLUMN IF NOT EXISTS physical_specs TEXT[],
+  ADD COLUMN IF NOT EXISTS housing TEXT,
+  ADD COLUMN IF NOT EXISTS garden TEXT,
+  ADD COLUMN IF NOT EXISTS alone_time TEXT,
+  ADD COLUMN IF NOT EXISTS other_animals TEXT,
+  ADD COLUMN IF NOT EXISTS noise_level TEXT,
   ADD COLUMN IF NOT EXISTS health_signs TEXT[],
+  ADD COLUMN IF NOT EXISTS fav_treats TEXT,
+  ADD COLUMN IF NOT EXISTS fav_toys TEXT,
+  ADD COLUMN IF NOT EXISTS fav_activities TEXT[],
   ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE,
   ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
@@ -71,13 +140,25 @@ CREATE TABLE IF NOT EXISTS public.scans (
   dog_id UUID NOT NULL REFERENCES public.dogs(id) ON DELETE CASCADE,
   scan_mode TEXT NOT NULL DEFAULT 'quick',
   audio_duration_ms INTEGER,
+  audio_peak_freq REAL,
+  audio_volume REAL,
+  audio_bands JSONB,
   is_bark BOOLEAN NOT NULL DEFAULT TRUE,
+  detection_type TEXT,
   context JSONB,
   body_language JSONB,
   hypotheses JSONB,
-  correction_emotion TEXT,
-  validated_hypothesis INTEGER,
+  cartography_note TEXT,
+  recurring_pattern TEXT,
+  ai_advice TEXT,
+  raw_ai_response JSONB,
   validated BOOLEAN NOT NULL DEFAULT FALSE,
+  validated_hypothesis INTEGER,
+  correction BOOLEAN NOT NULL DEFAULT FALSE,
+  correction_text TEXT,
+  correction_emotion TEXT,
+  scanned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  hour_of_day INTEGER,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -86,13 +167,25 @@ ALTER TABLE public.scans
   ADD COLUMN IF NOT EXISTS dog_id UUID REFERENCES public.dogs(id) ON DELETE CASCADE,
   ADD COLUMN IF NOT EXISTS scan_mode TEXT NOT NULL DEFAULT 'quick',
   ADD COLUMN IF NOT EXISTS audio_duration_ms INTEGER,
+  ADD COLUMN IF NOT EXISTS audio_peak_freq REAL,
+  ADD COLUMN IF NOT EXISTS audio_volume REAL,
+  ADD COLUMN IF NOT EXISTS audio_bands JSONB,
   ADD COLUMN IF NOT EXISTS is_bark BOOLEAN NOT NULL DEFAULT TRUE,
+  ADD COLUMN IF NOT EXISTS detection_type TEXT,
   ADD COLUMN IF NOT EXISTS context JSONB,
   ADD COLUMN IF NOT EXISTS body_language JSONB,
   ADD COLUMN IF NOT EXISTS hypotheses JSONB,
-  ADD COLUMN IF NOT EXISTS correction_emotion TEXT,
-  ADD COLUMN IF NOT EXISTS validated_hypothesis INTEGER,
+  ADD COLUMN IF NOT EXISTS cartography_note TEXT,
+  ADD COLUMN IF NOT EXISTS recurring_pattern TEXT,
+  ADD COLUMN IF NOT EXISTS ai_advice TEXT,
+  ADD COLUMN IF NOT EXISTS raw_ai_response JSONB,
   ADD COLUMN IF NOT EXISTS validated BOOLEAN NOT NULL DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS validated_hypothesis INTEGER,
+  ADD COLUMN IF NOT EXISTS correction BOOLEAN NOT NULL DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS correction_text TEXT,
+  ADD COLUMN IF NOT EXISTS correction_emotion TEXT,
+  ADD COLUMN IF NOT EXISTS scanned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  ADD COLUMN IF NOT EXISTS hour_of_day INTEGER,
   ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
 -- ---------------------------------------------------------------------
@@ -133,8 +226,201 @@ CREATE TRIGGER trg_profiles_set_updated_at
 BEFORE UPDATE ON public.profiles
 FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_profiles_referral_code_unique
+ON public.profiles(referral_code)
+WHERE referral_code IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_profiles_referral_code ON public.profiles(referral_code);
 CREATE INDEX IF NOT EXISTS idx_profiles_referred_by ON public.profiles(referred_by);
+
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER AS $$
+BEGIN
+  INSERT INTO public.profiles (id, email)
+  VALUES (NEW.id, NEW.email)
+  ON CONFLICT (id) DO UPDATE
+    SET email = COALESCE(EXCLUDED.email, public.profiles.email);
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+AFTER INSERT ON auth.users
+FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+CREATE OR REPLACE FUNCTION public.add_xp(p_user_id UUID, p_amount INTEGER)
+RETURNS JSONB AS $$
+DECLARE
+  v_profile public.profiles%ROWTYPE;
+  v_new_xp INTEGER;
+  v_new_level INTEGER;
+  v_xp_needed INTEGER;
+  v_leveled_up BOOLEAN := FALSE;
+  v_coins_earned INTEGER;
+BEGIN
+  SELECT *
+  INTO v_profile
+  FROM public.profiles
+  WHERE id = p_user_id;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'profile_not_found';
+  END IF;
+
+  v_new_xp := COALESCE(v_profile.xp, 0) + COALESCE(p_amount, 0);
+  v_new_level := COALESCE(v_profile.level, 1);
+  v_xp_needed := v_new_level * 200;
+
+  WHILE v_new_xp >= v_xp_needed LOOP
+    v_new_xp := v_new_xp - v_xp_needed;
+    v_new_level := v_new_level + 1;
+    v_xp_needed := v_new_level * 200;
+    v_leveled_up := TRUE;
+  END LOOP;
+
+  v_coins_earned := FLOOR(COALESCE(p_amount, 0) / 3.0);
+
+  UPDATE public.profiles
+  SET xp = v_new_xp,
+      level = v_new_level,
+      coins = COALESCE(coins, 0) + v_coins_earned,
+      total_coins_earned = COALESCE(total_coins_earned, 0) + v_coins_earned,
+      last_active = CURRENT_DATE
+  WHERE id = p_user_id;
+
+  RETURN jsonb_build_object(
+    'xp', v_new_xp,
+    'level', v_new_level,
+    'coins_earned', v_coins_earned,
+    'leveled_up', v_leveled_up
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+CREATE OR REPLACE FUNCTION public.update_streak(p_user_id UUID)
+RETURNS INTEGER AS $$
+DECLARE
+  v_last DATE;
+  v_streak INTEGER;
+BEGIN
+  SELECT last_active, COALESCE(streak, 0)
+  INTO v_last, v_streak
+  FROM public.profiles
+  WHERE id = p_user_id;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'profile_not_found';
+  END IF;
+
+  IF v_last = CURRENT_DATE THEN
+    RETURN v_streak;
+  ELSIF v_last = CURRENT_DATE - 1 THEN
+    v_streak := v_streak + 1;
+  ELSE
+    v_streak := 1;
+  END IF;
+
+  UPDATE public.profiles
+  SET streak = v_streak,
+      last_active = CURRENT_DATE
+  WHERE id = p_user_id;
+
+  RETURN v_streak;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+CREATE OR REPLACE FUNCTION public.apply_referral_code(p_new_user_id UUID, p_referral_code TEXT)
+RETURNS TABLE (
+  applied BOOLEAN,
+  reason TEXT,
+  referral_count INTEGER,
+  founder_status TEXT,
+  beta_priority_score INTEGER,
+  tier_label TEXT
+) AS $$
+DECLARE
+  v_referral_code TEXT := UPPER(TRIM(COALESCE(p_referral_code, '')));
+  v_new_user public.profiles%ROWTYPE;
+  v_referrer public.profiles%ROWTYPE;
+  v_next_count INTEGER;
+BEGIN
+  SELECT *
+  INTO v_new_user
+  FROM public.profiles
+  WHERE id = p_new_user_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'new_user_profile_not_found';
+  END IF;
+
+  IF v_new_user.referred_by IS NOT NULL THEN
+    RETURN QUERY SELECT FALSE, 'already_referred', NULL::INTEGER, NULL::TEXT, NULL::INTEGER, NULL::TEXT;
+    RETURN;
+  END IF;
+
+  SELECT *
+  INTO v_referrer
+  FROM public.profiles
+  WHERE referral_code = v_referral_code
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'referral_code_not_found';
+  END IF;
+
+  IF v_referrer.id = p_new_user_id THEN
+    RAISE EXCEPTION 'self_referral_not_allowed';
+  END IF;
+
+  UPDATE public.profiles
+  SET referred_by = v_referral_code
+  WHERE id = p_new_user_id
+    AND referred_by IS NULL;
+
+  IF NOT FOUND THEN
+    RETURN QUERY SELECT FALSE, 'already_referred', NULL::INTEGER, NULL::TEXT, NULL::INTEGER, NULL::TEXT;
+    RETURN;
+  END IF;
+
+  v_next_count := COALESCE(v_referrer.referral_count, 0) + 1;
+
+  UPDATE public.profiles
+  SET referral_count = v_next_count,
+      founder_status = CASE
+        WHEN v_next_count >= 10 THEN 'founder_10'
+        WHEN v_next_count >= 5 THEN 'founder_5'
+        WHEN v_next_count >= 3 THEN 'founder_3'
+        WHEN v_next_count >= 1 THEN 'founder_1'
+        ELSE 'standard'
+      END,
+      beta_priority_score = CASE
+        WHEN v_next_count >= 10 THEN 100
+        WHEN v_next_count >= 5 THEN 50
+        WHEN v_next_count >= 3 THEN 30
+        WHEN v_next_count >= 1 THEN 10
+        ELSE 0
+      END
+  WHERE id = v_referrer.id
+  RETURNING founder_status, beta_priority_score
+  INTO founder_status, beta_priority_score;
+
+  tier_label := CASE
+    WHEN v_next_count >= 10 THEN 'VIP fondateur'
+    WHEN v_next_count >= 5 THEN 'Avantage premium (en attente)'
+    WHEN v_next_count >= 3 THEN 'Priorité bêta'
+    WHEN v_next_count >= 1 THEN 'Badge fondateur'
+    ELSE 'Standard'
+  END;
+
+  referral_count := v_next_count;
+  applied := TRUE;
+  reason := NULL;
+
+  RETURN NEXT;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 -- RLS hardening (explicit + non-permissive)
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
