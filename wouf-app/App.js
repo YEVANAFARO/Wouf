@@ -104,19 +104,29 @@ export default function App() {
   // ── Charger les données user ─────────────────────────────
   const loadUserData = async (userId) => {
     try {
+      console.log('[App] loadUserData.start', { userId });
       const prof = await profileService.get();
+      console.log('[App] loadUserData.profile.success', { userId, profileId: prof?.id || null });
       setProfile(prof);
 
       const { dogService } = require('./src/services/database');
       const userDogs = await dogService.getAll();
+      console.log('[App] loadUserData.dogs.success', { userId, dogCount: userDogs.length });
       setDogs(userDogs);
 
       // Update streak
       await profileService.updateStreak();
+      console.log('[App] loadUserData.updateStreak.success', { userId });
 
       setHasOnboarded(userDogs.length > 0);
     } catch (error) {
-      console.error('Error loading user data:', error);
+      console.error('Error loading user data', {
+        userId,
+        message: error?.message || 'unknown_error',
+        code: error?.code || null,
+        details: error?.details || null,
+        hint: error?.hint || null,
+      });
     } finally {
       setLoading(false);
     }
