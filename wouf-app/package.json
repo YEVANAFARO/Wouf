@@ -1,7 +1,7 @@
 {
   "name": "wouf-app",
   "version": "1.0.0",
-  "main": "App.js",
+  "main": "node_modules/expo/AppEntry.js",
   "scripts": {
     "start": "npx expo start",
     "android": "npx expo start --android",

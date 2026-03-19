@@ -61,12 +61,15 @@ export default function DogProfileScreen({ navigation }) {
 
     setSaving(true);
     try {
+      console.log('[DogProfile] dog.create.start', { name: dog.name.trim(), hasPhoto: Boolean(dog.photo) });
       const created = await dogService.create({
         ...dog,
         name: dog.name.trim(),
         favTreats: dog.favTreats.trim(),
         favToys: dog.favToys.trim(),
       });
+
+      console.log('[DogProfile] dog.create.success', { dogId: created?.id });
 
       let photoNotice = null;
       if (dog.photo) {
@@ -79,13 +82,21 @@ export default function DogProfileScreen({ navigation }) {
       }
 
       await profileService.addXp(200);
+      console.log('[DogProfile] dog.refresh.start');
       await refreshDogs();
+      console.log('[DogProfile] dog.refresh.success');
 
       if (photoNotice) {
         Alert.alert('Profil créé', photoNotice);
       }
       // Navigation automatique via App.js (hasOnboarded = true)
     } catch (error) {
+      console.error('[DogProfile] dog.create.failure', {
+        message: error?.message || 'unknown_error',
+        code: error?.code || null,
+        details: error?.details || null,
+        hint: error?.hint || null,
+      });
       Alert.alert('Erreur', getUserFacingError(error, 'Impossible de créer le profil chien pour le moment.'));
     } finally {
       setSaving(false);
