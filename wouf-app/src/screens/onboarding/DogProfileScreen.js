@@ -16,7 +16,7 @@ import { getUserFacingError } from '../../services/userFacingErrors';
 
 const STEPS = ['photo', 'identity', 'breed', 'size', 'personality', 'triggers', 'environment', 'health', 'summary'];
 
-export default function DogProfileScreen({ navigation }) {
+export default function DogProfileScreen({ navigation, route }) {
   const { colors } = useContext(ThemeContext);
   const { refreshDogs } = useContext(DogsContext);
   const [step, setStep] = useState(0);
@@ -81,13 +81,34 @@ export default function DogProfileScreen({ navigation }) {
         }
       }
 
-      await profileService.addXp(200);
+      let profileNotice = null;
+      try {
+        await profileService.addXp(200);
+      } catch (profileError) {
+        console.warn('[DogProfile] profile reward skipped', {
+          message: profileError?.message || 'unknown_error',
+          code: profileError?.code || null,
+          details: profileError?.details || null,
+          hint: profileError?.hint || null,
+        });
+        profileNotice = 'Le profil du chien est créé, mais la mise à jour du profil sera réessayée plus tard.';
+      }
+
       console.log('[DogProfile] dog.refresh.start');
       await refreshDogs();
       console.log('[DogProfile] dog.refresh.success');
+      console.log('[DogProfile] navigation.afterDogRefresh', {
+        routeName: route?.name || null,
+        canGoBack: navigation.canGoBack(),
+      });
 
-      if (photoNotice) {
-        Alert.alert('Profil créé', photoNotice);
+      if (route?.name === 'AddDog' && navigation.canGoBack()) {
+        navigation.goBack();
+        return;
+      }
+
+      if (photoNotice || profileNotice) {
+        Alert.alert('Profil créé', [photoNotice, profileNotice].filter(Boolean).join('\n\n'));
       }
       // Navigation automatique via App.js (hasOnboarded = true)
     } catch (error) {
