@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { ThemeContext } from '../../context/appContexts';
 import { auth, supabase } from '../../config/supabase';
+import { profileService } from '../../services/database';
 import { getUserFacingError } from '../../services/userFacingErrors';
 
 export default function AuthScreen({ navigation }) {
@@ -63,7 +64,9 @@ export default function AuthScreen({ navigation }) {
               city: city.trim() || null,
             };
 
-            await supabase.from('profiles').update(cleanPatch).eq('id', userId);
+            console.log('[Auth] profile.ensure.start', { userId, cleanPatch });
+            await profileService.ensure(cleanPatch, signUpData.user);
+            console.log('[Auth] profile.ensure.success', { userId });
 
             const normalizedCode = (refCode || '').trim().toUpperCase();
             if (normalizedCode) {
@@ -84,7 +87,13 @@ export default function AuthScreen({ navigation }) {
               }
             }
           } catch (enrichmentError) {
-            console.warn('[Auth] profile enrichment skipped:', enrichmentError?.message || 'unknown_error');
+            console.warn('[Auth] profile enrichment skipped', {
+              userId,
+              message: enrichmentError?.message || 'unknown_error',
+              code: enrichmentError?.code || null,
+              details: enrichmentError?.details || null,
+              hint: enrichmentError?.hint || null,
+            });
           }
         }
 

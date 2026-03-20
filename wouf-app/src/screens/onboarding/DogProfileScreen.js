@@ -61,12 +61,15 @@ export default function DogProfileScreen({ navigation }) {
 
     setSaving(true);
     try {
+      console.log('[DogProfile] dog.create.start', { name: dog.name.trim(), hasPhoto: Boolean(dog.photo) });
       const created = await dogService.create({
         ...dog,
         name: dog.name.trim(),
         favTreats: dog.favTreats.trim(),
         favToys: dog.favToys.trim(),
       });
+
+      console.log('[DogProfile] dog.create.success', { dogId: created?.id });
 
       let photoNotice = null;
       if (dog.photo) {
@@ -78,14 +81,34 @@ export default function DogProfileScreen({ navigation }) {
         }
       }
 
-      await profileService.addXp(200);
-      await refreshDogs();
+      let profileNotice = null;
+      try {
+        await profileService.addXp(200);
+      } catch (profileError) {
+        console.warn('[DogProfile] profile reward skipped', {
+          message: profileError?.message || 'unknown_error',
+          code: profileError?.code || null,
+          details: profileError?.details || null,
+          hint: profileError?.hint || null,
+        });
+        profileNotice = 'Le profil du chien est créé, mais la mise à jour du profil sera réessayée plus tard.';
+      }
 
-      if (photoNotice) {
-        Alert.alert('Profil créé', photoNotice);
+      console.log('[DogProfile] dog.refresh.start');
+      await refreshDogs();
+      console.log('[DogProfile] dog.refresh.success');
+
+      if (photoNotice || profileNotice) {
+        Alert.alert('Profil créé', [photoNotice, profileNotice].filter(Boolean).join('\n\n'));
       }
       // Navigation automatique via App.js (hasOnboarded = true)
     } catch (error) {
+      console.error('[DogProfile] dog.create.failure', {
+        message: error?.message || 'unknown_error',
+        code: error?.code || null,
+        details: error?.details || null,
+        hint: error?.hint || null,
+      });
       Alert.alert('Erreur', getUserFacingError(error, 'Impossible de créer le profil chien pour le moment.'));
     } finally {
       setSaving(false);

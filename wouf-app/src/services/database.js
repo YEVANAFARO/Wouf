@@ -9,6 +9,201 @@
 import { supabase } from '../config/supabase';
 import { FEEDBACK_EVENT_MAPPING, RECURRING_PATTERN_MAPPING, recordUserFeedbackEvent, refreshRecurringPatternsForDog } from './learning';
 
+const isDev = typeof __DEV__ === 'undefined' ? true : __DEV__;
+
+function logDev(message, payload) {
+  if (!isDev) return;
+  if (payload === undefined) console.log(message);
+  else console.log(message, payload);
+}
+
+function logSupabaseError(message, error, payload = undefined) {
+  console.error(message, {
+    code: error?.code || null,
+    message: error?.message || 'unknown_error',
+    details: error?.details || null,
+    hint: error?.hint || null,
+    status: error?.status || null,
+    ...(payload ? { payload } : {}),
+  });
+}
+
+function isMissingRpcError(error, fnName) {
+  const msg = String(error?.message || '').toLowerCase();
+  return msg.includes(`function public.${fnName}`) || msg.includes(`could not find the function public.${fnName}`);
+}
+
+function isDogSchemaMismatch(error) {
+  const msg = String(error?.message || '').toLowerCase();
+  const details = String(error?.details || '').toLowerCase();
+  return [msg, details].some((value) => (
+    value.includes('column')
+    || value.includes('schema cache')
+    || value.includes('photo_url')
+    || value.includes('birth_mode')
+    || value.includes('fav_activities')
+  ));
+}
+
+function buildOwnedProfilePayload(user, fields = {}) {
+  const payload = {
+    id: user.id,
+    email: user.email || fields.email || null,
+    phone: fields.phone ?? null,
+    postal_code: fields.postal_code ?? null,
+    city: fields.city ?? null,
+  };
+
+  [
+    'xp',
+    'level',
+    'streak',
+    'coins',
+    'total_coins_earned',
+    'last_active',
+  ].forEach((key) => {
+    if (fields[key] !== undefined) payload[key] = fields[key];
+  });
+
+  return payload;
+}
+
+async function ensureProfileRecord(user, fields = {}) {
+  if (!user) return null;
+
+  logDev('[DB] profile.load.start', { userId: user.id, mode: 'ensure' });
+
+  const { data: existingProfile, error: existingProfileError } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('id', user.id)
+    .maybeSingle();
+
+  if (existingProfileError) {
+    logSupabaseError('[DB] profile.load.error', existingProfileError, { userId: user.id });
+    throw existingProfileError;
+  }
+
+  if (existingProfile) {
+    logDev('[DB] profile.load.success', { userId: user.id, source: 'existing' });
+    if (!Object.keys(fields).length) return existingProfile;
+
+    const { data: updatedProfile, error: updatedProfileError } = await supabase
+      .from('profiles')
+      .upsert(buildOwnedProfilePayload(user, { ...existingProfile, ...fields }), { onConflict: 'id' })
+      .select('*')
+      .single();
+
+    if (updatedProfileError) {
+      logSupabaseError('[DB] profile.update.error', updatedProfileError, { userId: user.id, fields });
+      throw updatedProfileError;
+    }
+
+    logDev('[DB] profile.update.success', { userId: user.id, fields: Object.keys(fields) });
+    return updatedProfile;
+  }
+
+  const profilePayload = buildOwnedProfilePayload(user, fields);
+  logDev('[DB] profile.create.start', { userId: user.id, fields: profilePayload });
+
+  const { data: createdProfile, error: createdProfileError } = await supabase
+    .from('profiles')
+    .upsert(profilePayload, { onConflict: 'id' })
+    .select('*')
+    .single();
+
+  if (createdProfileError) {
+    logSupabaseError('[DB] profile.create.error', createdProfileError, { userId: user.id, fields: profilePayload });
+    throw createdProfileError;
+  }
+
+  logDev('[DB] profile.create.success', { userId: user.id });
+  return createdProfile;
+}
+
+function computeXpFallback(profile, amount) {
+  let xp = Number(profile?.xp || 0) + Number(amount || 0);
+  let level = Number(profile?.level || 1);
+  let xpNeeded = level * 200;
+  let leveledUp = false;
+
+  while (xp >= xpNeeded) {
+    xp -= xpNeeded;
+    level += 1;
+    xpNeeded = level * 200;
+    leveledUp = true;
+  }
+
+  const coinsEarned = Math.floor(Number(amount || 0) / 3);
+
+  return {
+    xp,
+    level,
+    coins_earned: coinsEarned,
+    leveled_up: leveledUp,
+    coins: Number(profile?.coins || 0) + coinsEarned,
+    total_coins_earned: Number(profile?.total_coins_earned || 0) + coinsEarned,
+    last_active: new Date().toISOString().slice(0, 10),
+  };
+}
+
+function computeStreakFallback(profile) {
+  const today = new Date();
+  const todayStr = today.toISOString().slice(0, 10);
+  const yesterday = new Date(today);
+  yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+  const yesterdayStr = yesterday.toISOString().slice(0, 10);
+  const lastActive = profile?.last_active || null;
+  let streak = Number(profile?.streak || 0);
+
+  if (lastActive === todayStr) {
+    return { streak, last_active: todayStr };
+  }
+
+  if (lastActive === yesterdayStr) streak += 1;
+  else streak = 1;
+
+  return { streak, last_active: todayStr };
+}
+
+function buildDogInsertPayload(userId, dogData, { minimal = false } = {}) {
+  const payload = {
+    user_id: userId,
+    name: dogData.name,
+    breed: dogData.breed || null,
+    mix_breeds: dogData.mixBreeds || [],
+    birth_year: dogData.bdYear ? parseInt(dogData.bdYear, 10) : null,
+    personality: dogData.personality || [],
+    triggers: dogData.triggers || [],
+    health_signs: dogData.healthSigns || [],
+    is_active: true,
+  };
+
+  if (minimal) return payload;
+
+  return {
+    ...payload,
+    photo_url: dogData.photo_url || null,
+    sex: dogData.sex,
+    neutered: dogData.neutered,
+    birth_mode: dogData.bdMode,
+    birth_date: dogData.bdExact || null,
+    birth_month: dogData.bdMonth || null,
+    birth_reminder: dogData.bdReminder ?? true,
+    breed_mode: dogData.breedMode,
+    size: dogData.size,
+    physical_specs: dogData.physSpec || [],
+    housing: dogData.housing,
+    garden: dogData.garden,
+    alone_time: dogData.alone,
+    other_animals: dogData.otherAnimals,
+    noise_level: dogData.noise,
+    fav_treats: dogData.favTreats || '',
+    fav_toys: dogData.favToys || '',
+    fav_activities: dogData.favActivities || [],
+  };
+}
+
 export const SCAN_PERSISTENCE_MAPPING = {
   scans: {
     mode: 'scanData.mode',
@@ -354,49 +549,91 @@ export const profileService = {
   async get() {
     const user = await getAuthenticatedUser({ allowNull: true });
     if (!user) return null;
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', user.id)
-      .single();
-    if (error) throw error;
-    return data;
+    return ensureProfileRecord(user);
+  },
+
+  async ensure(fields = {}, explicitUser = null) {
+    const user = explicitUser || await getAuthenticatedUser({ allowNull: true });
+    if (!user) return null;
+    return ensureProfileRecord(user, fields);
   },
 
   /** Mettre à jour le profil */
   async update(fields) {
     const user = await getAuthenticatedUser();
-    const { data, error } = await supabase
-      .from('profiles')
-      .update(fields)
-      .eq('id', user.id)
-      .select()
-      .single();
-    if (error) throw error;
-    return data;
+    return ensureProfileRecord(user, fields);
   },
 
   /** Ajouter de l'XP (via fonction SQL) */
   async addXp(amount) {
     const user = await getAuthenticatedUser({ allowNull: true });
     if (!user) return null;
+
+    logDev('[DB] add_xp.start', { userId: user.id, amount });
+
     const { data, error } = await supabase.rpc('add_xp', {
       p_user_id: user.id,
       p_amount: amount,
     });
-    if (error) throw error;
-    return data; // {xp, level, coins_earned, leveled_up}
+
+    if (!error) {
+      logDev('[DB] add_xp.success', { userId: user.id, amount, data });
+      return data;
+    }
+
+    if (!isMissingRpcError(error, 'add_xp')) {
+      logSupabaseError('[DB] add_xp.error', error, { userId: user.id, amount });
+      throw error;
+    }
+
+    console.warn('[DB] add_xp.rpc_missing_fallback', { userId: user.id, amount });
+    const profile = await ensureProfileRecord(user);
+    const fallback = computeXpFallback(profile, amount);
+    const updatedProfile = await ensureProfileRecord(user, {
+      xp: fallback.xp,
+      level: fallback.level,
+      coins: fallback.coins,
+      total_coins_earned: fallback.total_coins_earned,
+      last_active: fallback.last_active,
+    });
+
+    logDev('[DB] add_xp.fallback_success', { userId: user.id, updatedProfileId: updatedProfile?.id });
+
+    return {
+      xp: fallback.xp,
+      level: fallback.level,
+      coins_earned: fallback.coins_earned,
+      leveled_up: fallback.leveled_up,
+    };
   },
 
   /** Mettre à jour le streak (via fonction SQL) */
   async updateStreak() {
     const user = await getAuthenticatedUser({ allowNull: true });
     if (!user) return null;
+
+    logDev('[DB] update_streak.start', { userId: user.id });
+
     const { data, error } = await supabase.rpc('update_streak', {
       p_user_id: user.id,
     });
-    if (error) throw error;
-    return data; // nouveau streak
+
+    if (!error) {
+      logDev('[DB] update_streak.success', { userId: user.id, streak: data });
+      return data;
+    }
+
+    if (!isMissingRpcError(error, 'update_streak')) {
+      logSupabaseError('[DB] update_streak.error', error, { userId: user.id });
+      throw error;
+    }
+
+    console.warn('[DB] update_streak.rpc_missing_fallback', { userId: user.id });
+    const profile = await ensureProfileRecord(user);
+    const fallback = computeStreakFallback(profile);
+    await ensureProfileRecord(user, fallback);
+    logDev('[DB] update_streak.fallback_success', { userId: user.id, streak: fallback.streak });
+    return fallback.streak;
   },
 };
 
@@ -409,13 +646,23 @@ export const dogService = {
   async getAll() {
     const user = await getAuthenticatedUser({ allowNull: true });
     if (!user) return [];
+
+    await ensureProfileRecord(user);
+    logDev('[DB] dogs.load.start', { userId: user.id });
+
     const { data, error } = await supabase
       .from('dogs')
       .select('*')
       .eq('user_id', user.id)
       .eq('is_active', true)
       .order('created_at');
-    if (error) throw error;
+
+    if (error) {
+      logSupabaseError('[DB] dogs.load.error', error, { userId: user.id });
+      throw error;
+    }
+
+    logDev('[DB] dogs.load.success', { userId: user.id, count: data?.length || 0 });
     return data || [];
   },
 
@@ -433,40 +680,42 @@ export const dogService = {
   /** Créer un nouveau chien */
   async create(dogData) {
     const user = await getAuthenticatedUser();
-    const { data, error } = await supabase
+    await ensureProfileRecord(user);
+
+    const fullPayload = buildDogInsertPayload(user.id, dogData);
+    logDev('[DB] dog.create.start', { userId: user.id, payloadKeys: Object.keys(fullPayload) });
+
+    const fullInsert = await supabase
       .from('dogs')
-      .insert({
-        user_id: user.id,
-        name: dogData.name,
-        photo_url: dogData.photo_url || null,
-        sex: dogData.sex,
-        neutered: dogData.neutered,
-        birth_mode: dogData.bdMode,
-        birth_date: dogData.bdExact || null,
-        birth_year: dogData.bdYear ? parseInt(dogData.bdYear) : null,
-        birth_month: dogData.bdMonth || null,
-        birth_reminder: dogData.bdReminder ?? true,
-        breed_mode: dogData.breedMode,
-        breed: dogData.breed || null,
-        mix_breeds: dogData.mixBreeds || [],
-        size: dogData.size,
-        personality: dogData.personality || [],
-        triggers: dogData.triggers || [],
-        physical_specs: dogData.physSpec || [],
-        housing: dogData.housing,
-        garden: dogData.garden,
-        alone_time: dogData.alone,
-        other_animals: dogData.otherAnimals,
-        noise_level: dogData.noise,
-        health_signs: dogData.healthSigns || [],
-        fav_treats: dogData.favTreats || '',
-        fav_toys: dogData.favToys || '',
-        fav_activities: dogData.favActivities || [],
-      })
+      .insert(fullPayload)
       .select()
       .single();
-    if (error) throw error;
-    return data;
+
+    if (!fullInsert.error) {
+      logDev('[DB] dog.create.success', { userId: user.id, dogId: fullInsert.data?.id, mode: 'full' });
+      return fullInsert.data;
+    }
+
+    logSupabaseError('[DB] dog.create.error', fullInsert.error, { userId: user.id, payloadKeys: Object.keys(fullPayload) });
+
+    if (!isDogSchemaMismatch(fullInsert.error)) throw fullInsert.error;
+
+    const minimalPayload = buildDogInsertPayload(user.id, dogData, { minimal: true });
+    console.warn('[DB] dog.create.schema_fallback', { userId: user.id, payloadKeys: Object.keys(minimalPayload) });
+
+    const fallbackInsert = await supabase
+      .from('dogs')
+      .insert(minimalPayload)
+      .select()
+      .single();
+
+    if (fallbackInsert.error) {
+      logSupabaseError('[DB] dog.create.fallback_error', fallbackInsert.error, { userId: user.id, payloadKeys: Object.keys(minimalPayload) });
+      throw fallbackInsert.error;
+    }
+
+    logDev('[DB] dog.create.success', { userId: user.id, dogId: fallbackInsert.data?.id, mode: 'minimal' });
+    return fallbackInsert.data;
   },
 
   /** Mettre à jour un chien */
