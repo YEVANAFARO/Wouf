@@ -171,7 +171,7 @@ export default function App() {
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.bg }}>
         <Text style={{ fontSize: 48, marginBottom: 16 }}>🐕</Text>
         <Text style={{ fontSize: 32, fontWeight: '900', color: colors.p, letterSpacing: 6 }}>WOUF</Text>
-        <ActivityIndicator color={colors.p} size="large" style={{ marginTop: 24 }} />
+        <ActivityIndicator color={colors.p} size={32} style={{ marginTop: 24 }} />
       </View>
     );
   }
