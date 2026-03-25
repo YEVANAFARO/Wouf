@@ -3,8 +3,19 @@ import { View, Text, ScrollView, TouchableOpacity } from 'react-native';
 import { ThemeContext, DogsContext } from '../../context/appContexts';
 import { scanService } from '../../services/database';
 import { getUserFacingError } from '../../services/userFacingErrors';
+import { getDogAccentColor } from '../../utils/dogIdentity';
+
+function toFiniteNumber(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
 
 const DAY_LABELS = ['D', 'L', 'M', 'M', 'J', 'V', 'S'];
+const LOAD_TIMEOUT_MS = 8000;
 const EMPTY_STATS = {
   total: 0,
   validatedCount: 0,
@@ -25,6 +36,7 @@ const EMPTY_STATS = {
 export default function CartographyScreen() {
   const { colors } = useContext(ThemeContext);
   const { activeDog } = useContext(DogsContext);
+  const dogAccent = getDogAccentColor(activeDog);
   const [stats, setStats] = useState(EMPTY_STATS);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -40,7 +52,10 @@ export default function CartographyScreen() {
     setLoading(true);
     setLoadError('');
     try {
-      const nextStats = await scanService.getStats(activeDog.id);
+      const nextStats = await Promise.race([
+        scanService.getStats(activeDog.id),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('cartography_timeout')), LOAD_TIMEOUT_MS)),
+      ]);
       setStats({ ...EMPTY_STATS, ...nextStats });
     } catch (error) {
       setStats(EMPTY_STATS);
@@ -78,8 +93,10 @@ export default function CartographyScreen() {
   const validated = stats.validatedStates || [];
   const recurring = stats.recurring || [];
   const topContexts = stats.topContexts || [];
-  const hours = Array.isArray(stats.hours) && stats.hours.length === 24 ? stats.hours : EMPTY_STATS.hours;
-  const days = Array.isArray(stats.days) && stats.days.length === 7 ? stats.days : EMPTY_STATS.days;
+  const hours = (Array.isArray(stats.hours) && stats.hours.length === 24 ? stats.hours : EMPTY_STATS.hours)
+    .map((value) => toFiniteNumber(value, 0));
+  const days = (Array.isArray(stats.days) && stats.days.length === 7 ? stats.days : EMPTY_STATS.days)
+    .map((value) => toFiniteNumber(value, 0));
   const rawMaxHour = Math.max(...hours, 0);
   const maxHour = Math.max(rawMaxHour, 1);
   const hourMaxLabel = hours.findIndex((n) => n === rawMaxHour);
@@ -98,8 +115,9 @@ export default function CartographyScreen() {
     if (!items.length) return <Text style={{ fontSize: 11, color: colors.td }}>{emptyText}</Text>;
     const max = Math.max(...items.map(([, value]) => Number(value || 0)), 1);
     return items.map(([label, value]) => {
-      const display = totalMode === 'score' ? Math.round(Number(value || 0)) : Number(value || 0);
-      const width = `${Math.max(8, Math.round((Number(value || 0) / max) * 100))}%`;
+      const numericValue = toFiniteNumber(value, 0);
+      const display = totalMode === 'score' ? Math.round(numericValue) : numericValue;
+      const width = `${clamp(Math.round((numericValue / max) * 100), 8, 100)}%`;
       return (
         <View key={label} style={{ marginBottom: 8 }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
@@ -116,7 +134,7 @@ export default function CartographyScreen() {
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: colors.bg, padding: 16 }}>
-      <Text style={{ fontSize: 20, fontWeight: '800', color: colors.tx, marginBottom: 10 }}>🗺️ {activeDog.name}</Text>
+      <Text style={{ fontSize: 20, fontWeight: '800', color: dogAccent, marginBottom: 10 }}>🗺️ {activeDog.name}</Text>
 
       {!!loadError && (
         <View style={{ backgroundColor: colors.aG, borderRadius: 12, padding: 12, marginBottom: 10 }}>
@@ -142,6 +160,23 @@ export default function CartographyScreen() {
           </Text>
         </View>
       )}
+
+      <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
+        <View style={{ flex: 1, backgroundColor: colors.bg2, borderRadius: 12, padding: 12, borderWidth: 1, borderColor: colors.bd }}>
+          <Text style={{ fontSize: 10, color: colors.ts }}>Aujourd'hui</Text>
+          <Text style={{ fontSize: 13, fontWeight: '800', color: dogAccent, marginTop: 4 }}>
+            {hours[new Date().getHours()] || 0} scan(s)
+          </Text>
+          <Text style={{ fontSize: 10, color: colors.ts, marginTop: 4 }}>Pas d’infos pour le moment si 0.</Text>
+        </View>
+        <View style={{ flex: 1, backgroundColor: colors.bg2, borderRadius: 12, padding: 12, borderWidth: 1, borderColor: colors.bd }}>
+          <Text style={{ fontSize: 10, color: colors.ts }}>Cette semaine</Text>
+          <Text style={{ fontSize: 13, fontWeight: '800', color: dogAccent, marginTop: 4 }}>
+            {days.reduce((sum, value) => sum + value, 0)} scan(s)
+          </Text>
+          <Text style={{ fontSize: 10, color: colors.ts, marginTop: 4 }}>Pas d’infos pour le moment si 0.</Text>
+        </View>
+      </View>
 
       {!stats.hasEnoughHistory && (
         <View style={{ backgroundColor: colors.gG, borderRadius: 12, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: colors.g + '35' }}>
@@ -192,7 +227,7 @@ export default function CartographyScreen() {
               <View
                 style={{
                   width: '80%',
-                  height: Math.max(4, (count / maxHour) * 56),
+                  height: clamp((toFiniteNumber(count, 0) / maxHour) * 56, 4, 56),
                   backgroundColor: count > 0 ? colors.b : colors.b + '18',
                   borderRadius: 2,
                 }}
@@ -235,7 +270,7 @@ export default function CartographyScreen() {
               <View
                 style={{
                   width: '70%',
-                  height: Math.max(4, (count / maxDay) * 46),
+                  height: clamp((toFiniteNumber(count, 0) / maxDay) * 46, 4, 46),
                   backgroundColor: count > 0 ? colors.p : colors.p + '18',
                   borderRadius: 2,
                 }}

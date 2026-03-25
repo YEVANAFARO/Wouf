@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, ScrollView, RefreshControl } from 'react-
 import { ThemeContext, DogsContext } from '../../context/appContexts';
 import { scanService } from '../../services/database';
 import { getUserFacingError } from '../../services/userFacingErrors';
+import { getDogAccentColor } from '../../utils/dogIdentity';
 
 function resolveScanLabel(scan) {
   return scan?.corrected_label
@@ -26,6 +27,7 @@ function formatScanDate(scan) {
 export default function LibraryScreen({ navigation }) {
   const { colors } = useContext(ThemeContext);
   const { activeDog } = useContext(DogsContext);
+  const dogAccent = getDogAccentColor(activeDog);
   const [scans, setScans] = useState([]);
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState('all');
@@ -74,19 +76,43 @@ export default function LibraryScreen({ navigation }) {
   });
 
   const items = filter === 'all' ? scans : scans.filter((scan) => resolveScanLabel(scan) === filter);
+  const recentScans = scans.slice(0, 3);
+  const validatedScans = scans.filter((scan) => scan.validated).slice(0, 3);
 
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: colors.bg, padding: 16 }}
       refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={colors.p} />}
     >
-      <Text style={{ fontSize: 20, fontWeight: '800', color: colors.tx, marginBottom: 10 }}>📚 {activeDog.name}</Text>
+      <Text style={{ fontSize: 20, fontWeight: '800', color: dogAccent, marginBottom: 10 }}>📚 {activeDog.name}</Text>
 
       {!!loadError && (
         <View style={{ backgroundColor: colors.aG, borderRadius: 10, padding: 12, marginBottom: 10 }}>
           <Text style={{ color: colors.a, fontSize: 12, fontWeight: '700' }}>{loadError}</Text>
         </View>
       )}
+
+      <View style={{ backgroundColor: colors.bg2, borderRadius: 12, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: colors.bd }}>
+        <Text style={{ fontSize: 11, fontWeight: '700', color: colors.tx }}>Derniers scans</Text>
+        {!recentScans.length ? (
+          <Text style={{ fontSize: 11, color: colors.ts, marginTop: 6 }}>Pas d’infos pour le moment.</Text>
+        ) : recentScans.map((scan) => (
+          <Text key={`recent-${scan.id}`} style={{ fontSize: 11, color: colors.ts, marginTop: 4 }}>
+            • {resolveScanLabel(scan)} — {formatScanDate(scan)}
+          </Text>
+        ))}
+      </View>
+
+      <View style={{ backgroundColor: colors.bg2, borderRadius: 12, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: colors.bd }}>
+        <Text style={{ fontSize: 11, fontWeight: '700', color: colors.tx }}>Analyses récentes validées</Text>
+        {!validatedScans.length ? (
+          <Text style={{ fontSize: 11, color: colors.ts, marginTop: 6 }}>Pas d’infos pour le moment.</Text>
+        ) : validatedScans.map((scan) => (
+          <Text key={`validated-${scan.id}`} style={{ fontSize: 11, color: colors.ts, marginTop: 4 }}>
+            • {resolveScanLabel(scan)} — {formatScanDate(scan)}
+          </Text>
+        ))}
+      </View>
 
       <ScrollView horizontal style={{ marginBottom: 10 }}>
         {[['all', 'Tout'], ...Object.entries(cats)].map(([key, value]) => (
@@ -144,10 +170,10 @@ export default function LibraryScreen({ navigation }) {
       })}
 
       {!loading && items.length === 0 && (
-        <View style={{ alignItems: 'center', padding: 30 }}>
-          <Text style={{ fontSize: 40 }}>📚</Text>
-          <Text style={{ color: colors.td, textAlign: 'center' }}>
-            {loadError ? 'Réessaie un peu plus tard.' : 'Aucun scan enregistré pour le moment.'}
+        <View style={{ backgroundColor: colors.bg2, borderRadius: 12, padding: 16, borderWidth: 1, borderColor: colors.bd }}>
+          <Text style={{ fontSize: 11, fontWeight: '700', color: colors.tx }}>Historique</Text>
+          <Text style={{ color: colors.td, marginTop: 6 }}>
+            {loadError ? 'Pas d’infos pour le moment. Réessaie un peu plus tard.' : 'Pas d’infos pour le moment.'}
           </Text>
         </View>
       )}

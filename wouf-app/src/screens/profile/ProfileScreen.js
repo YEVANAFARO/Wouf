@@ -6,12 +6,13 @@ import { dataService } from '../../services/database';
 import { REFERRAL_TIERS, resolveReferralTier } from '../../services/monetization';
 import { getUserFacingError } from '../../services/userFacingErrors';
 
-export default function ProfileScreen({ navigation }) {
+export default function ProfileScreen() {
   const { colors, theme, toggle } = useContext(ThemeContext);
   const { profile } = useContext(AuthContext);
   const { activeDog } = useContext(DogsContext);
   const referralCount = profile?.referral_count || 0;
   const referralTier = resolveReferralTier(referralCount);
+  const showComingSoon = (label) => Alert.alert(label, 'Section en cours de stabilisation. Disponible bientôt.');
 
   const Row = ({ icon, label, sub, onPress, danger }) => (
     <TouchableOpacity onPress={onPress} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: colors.bg2, borderRadius: 10, padding: 10, marginBottom: 4, borderWidth: 1, borderColor: colors.bd }}>
@@ -64,20 +65,19 @@ export default function ProfileScreen({ navigation }) {
           <Text style={{ fontSize: 10, color: colors.ts }}>{activeDog?.breed || activeDog?.breed_mode || 'Profil chien à compléter'} · Niv.{profile?.level || 1}</Text>
         </View>
       </View>
-      <Row icon="🔔" label="Notifications" onPress={() => {}} />
-      <Row icon="💳" label="Plan" sub={(profile?.plan || 'free').toUpperCase()} onPress={() => {}} />
-      <Row icon="🎁" label="Parrainage" sub={`${profile?.referral_code || 'N/A'} · ${referralCount} filleul(s)`} onPress={() => {}} />
+      <Row icon="🔔" label="Notifications" onPress={() => showComingSoon('Notifications')} />
+      <Row icon="💳" label="Plan" sub={(profile?.plan || 'free').toUpperCase()} onPress={() => showComingSoon('Plan')} />
+      <Row icon="🎁" label="Parrainage" sub={`${profile?.referral_code || 'N/A'} · ${referralCount} filleul(s)`} onPress={() => showComingSoon('Parrainage')} />
       <View style={{ backgroundColor: colors.bg2, borderRadius: 10, padding: 10, marginBottom: 6, borderWidth: 1, borderColor: colors.bd }}>
         <Text style={{ fontSize: 11, fontWeight: '700', color: colors.tx }}>Statut fondateur: {profile?.founder_status || 'standard'}</Text>
         <Text style={{ fontSize: 10, color: colors.ts, marginTop: 4 }}>Palier actuel: {referralTier.label} · Priorité bêta: {profile?.beta_priority_score || 0}</Text>
         <Text style={{ fontSize: 9, color: colors.td, marginTop: 4 }}>Paliers: {REFERRAL_TIERS.map((tier) => `${tier.referrals}`).join(' / ')} referrals</Text>
       </View>
-      <Row icon="🛡️" label="RGPD" onPress={() => {}} />
-      <Row icon="❓" label="FAQ" onPress={() => {}} />
+      <Row icon="🛡️" label="RGPD" onPress={() => showComingSoon('RGPD')} />
+      <Row icon="❓" label="FAQ" onPress={() => showComingSoon('FAQ')} />
       <Row icon="🛍️" label="Shop (À venir)" sub="Teaser visible en bêta" onPress={() => Alert.alert('Shop WOUF', 'À venir pendant la bêta fermée.')} />
-      <Row icon="📬" label="Contact" sub="< 48h" onPress={() => {}} />
+      <Row icon="📬" label="Contact" sub="< 48h" onPress={() => showComingSoon('Contact')} />
       <Row icon="⭐" label="Laisser un avis" sub="+50🪙" onPress={() => Alert.alert('Merci !', 'Ton retour comptera beaucoup pendant la bêta fermée.')} />
-      <Row icon="➕" label="Ajouter un chien" onPress={() => navigation.navigate('AddDog')} />
       <Row icon={theme === 'dark' ? '☀️' : '🌙'} label={theme === 'dark' ? 'Mode clair' : 'Mode sombre'} onPress={toggle} />
       <Row icon="🗑️" label="Supprimer données" danger onPress={handleDeleteData} />
       <Row icon="🚪" label="Déconnexion" onPress={handleSignOut} />

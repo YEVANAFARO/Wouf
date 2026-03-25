@@ -10,6 +10,15 @@ import { CONTEXTS, BODY_QUESTIONS_QUICK, BODY_QUESTIONS_PRECISE } from '../../co
 import { canScanWithPlan } from '../../services/monetization';
 import { getUserFacingError } from '../../services/userFacingErrors';
 
+function toFiniteNumber(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
 function sanitizeHypotheses(result) {
   const hypotheses = Array.isArray(result?.hypotheses)
     ? result.hypotheses.filter((item) => item?.category)
@@ -38,6 +47,9 @@ export default function ScanFlowScreen({ navigation }) {
   const [saving, setSaving] = useState(false);
   const timeoutRef = useRef(null);
   const bodyQs = useMemo(() => (mode === 'precise' ? BODY_QUESTIONS_PRECISE : BODY_QUESTIONS_QUICK), [mode]);
+  const safeVolume = clamp(Math.round(toFiniteNumber(volume, 0)), 0, 100);
+  const safeProgress = clamp(toFiniteNumber(progress, 0), 0, 1);
+  const progressWidthPct = step === 'verifying' ? '100%' : `${Math.round(safeProgress * 100)}%`;
 
   useEffect(() => {
     return () => {
@@ -45,6 +57,15 @@ export default function ScanFlowScreen({ navigation }) {
       AudioService.cancel().catch(() => {});
     };
   }, []);
+
+  const leaveScan = (fallbackRoute = 'Home') => {
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+      return;
+    }
+
+    navigation.navigate(fallbackRoute);
+  };
 
   const resetFlow = async () => {
     if (timeoutRef.current) {
@@ -245,7 +266,7 @@ export default function ScanFlowScreen({ navigation }) {
       }
 
       await resetFlow();
-      navigation.goBack();
+      leaveScan();
     } catch (error) {
       Alert.alert('Sauvegarde impossible', getUserFacingError(error, 'Le résultat reste affiché, mais la sauvegarde a échoué. Réessaie dans un instant.'));
     } finally {
@@ -256,8 +277,11 @@ export default function ScanFlowScreen({ navigation }) {
   if (step === 'mode') {
     return (
       <View style={{ flex: 1, backgroundColor: colors.bg, justifyContent: 'center', alignItems: 'center', padding: 28 }}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={{ position: 'absolute', top: 50, left: 16 }}>
+        <TouchableOpacity onPress={() => leaveScan()} style={{ position: 'absolute', top: 50, left: 16 }}>
           <Text style={{ color: colors.p, fontWeight: '600' }}>← Retour</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => leaveScan()} style={{ position: 'absolute', top: 50, right: 16 }}>
+          <Text style={{ color: colors.ts, fontWeight: '700' }}>✕</Text>
         </TouchableOpacity>
         <Text style={{ fontSize: 52, marginBottom: 14 }}>🎙️</Text>
         <Text style={{ fontSize: 22, fontWeight: '800', color: colors.tx, textAlign: 'center' }}>Analyser {activeDog?.name || 'mon chien'}</Text>
@@ -295,10 +319,10 @@ export default function ScanFlowScreen({ navigation }) {
             Cas ambigu détecté — l'IA vérifie si c'est bien un vrai aboiement.
           </Text>
         ) : (
-          <Text style={{ fontSize: 28, fontWeight: '800', color: '#00F0C0', marginTop: 8 }}>{volume}%</Text>
+          <Text style={{ fontSize: 28, fontWeight: '800', color: '#00F0C0', marginTop: 8 }}>{safeVolume}%</Text>
         )}
         <View style={{ width: '60%', height: 4, backgroundColor: '#1C2E46', borderRadius: 2, marginTop: 12 }}>
-          <View style={{ width: `${step === 'verifying' ? 100 : progress * 100}%`, height: '100%', backgroundColor: step === 'verifying' ? '#A78BFA' : '#00F0C0', borderRadius: 2 }} />
+          <View style={{ width: progressWidthPct, height: '100%', backgroundColor: step === 'verifying' ? '#A78BFA' : '#00F0C0', borderRadius: 2 }} />
         </View>
         <TouchableOpacity onPress={resetFlow} style={{ marginTop: 18 }}>
           <Text style={{ color: '#AFC0D5', fontSize: 12, fontWeight: '700' }}>Annuler ce scan</Text>
