@@ -4,6 +4,15 @@ import { ThemeContext, DogsContext } from '../../context/appContexts';
 import { scanService } from '../../services/database';
 import { getUserFacingError } from '../../services/userFacingErrors';
 
+function toFiniteNumber(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
 const DAY_LABELS = ['D', 'L', 'M', 'M', 'J', 'V', 'S'];
 const EMPTY_STATS = {
   total: 0,
@@ -78,8 +87,10 @@ export default function CartographyScreen() {
   const validated = stats.validatedStates || [];
   const recurring = stats.recurring || [];
   const topContexts = stats.topContexts || [];
-  const hours = Array.isArray(stats.hours) && stats.hours.length === 24 ? stats.hours : EMPTY_STATS.hours;
-  const days = Array.isArray(stats.days) && stats.days.length === 7 ? stats.days : EMPTY_STATS.days;
+  const hours = (Array.isArray(stats.hours) && stats.hours.length === 24 ? stats.hours : EMPTY_STATS.hours)
+    .map((value) => toFiniteNumber(value, 0));
+  const days = (Array.isArray(stats.days) && stats.days.length === 7 ? stats.days : EMPTY_STATS.days)
+    .map((value) => toFiniteNumber(value, 0));
   const rawMaxHour = Math.max(...hours, 0);
   const maxHour = Math.max(rawMaxHour, 1);
   const hourMaxLabel = hours.findIndex((n) => n === rawMaxHour);
@@ -98,8 +109,9 @@ export default function CartographyScreen() {
     if (!items.length) return <Text style={{ fontSize: 11, color: colors.td }}>{emptyText}</Text>;
     const max = Math.max(...items.map(([, value]) => Number(value || 0)), 1);
     return items.map(([label, value]) => {
-      const display = totalMode === 'score' ? Math.round(Number(value || 0)) : Number(value || 0);
-      const width = `${Math.max(8, Math.round((Number(value || 0) / max) * 100))}%`;
+      const numericValue = toFiniteNumber(value, 0);
+      const display = totalMode === 'score' ? Math.round(numericValue) : numericValue;
+      const width = `${clamp(Math.round((numericValue / max) * 100), 8, 100)}%`;
       return (
         <View key={label} style={{ marginBottom: 8 }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
@@ -192,7 +204,7 @@ export default function CartographyScreen() {
               <View
                 style={{
                   width: '80%',
-                  height: Math.max(4, (count / maxHour) * 56),
+                  height: clamp((toFiniteNumber(count, 0) / maxHour) * 56, 4, 56),
                   backgroundColor: count > 0 ? colors.b : colors.b + '18',
                   borderRadius: 2,
                 }}
@@ -235,7 +247,7 @@ export default function CartographyScreen() {
               <View
                 style={{
                   width: '70%',
-                  height: Math.max(4, (count / maxDay) * 46),
+                  height: clamp((toFiniteNumber(count, 0) / maxDay) * 46, 4, 46),
                   backgroundColor: count > 0 ? colors.p : colors.p + '18',
                   borderRadius: 2,
                 }}
