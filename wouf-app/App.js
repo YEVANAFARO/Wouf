@@ -9,7 +9,7 @@ import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { View, Text, ActivityIndicator } from 'react-native';
+import { View, Text, ActivityIndicator, Platform } from 'react-native';
 import { supabase, auth } from './src/config/supabase';
 import { DARK, LIGHT } from './src/config/theme';
 import { ThemeContext, AuthContext, DogsContext } from './src/context/appContexts';
@@ -24,7 +24,7 @@ import LibraryScreen from './src/screens/library/LibraryScreen';
 import ScanDetailScreen from './src/screens/library/ScanDetailScreen';
 import CartographyScreen from './src/screens/cartography/CartographyScreen';
 import ProfileScreen from './src/screens/profile/ProfileScreen';
-import ScanFlowScreen from './src/screens/scan/ScanFlowScreen';
+import WebScanPlaceholderScreen from './src/screens/scan/WebScanPlaceholderScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -32,6 +32,9 @@ const Tab = createBottomTabNavigator();
 // ── Bottom Tab Navigator ───────────────────────────────────
 function MainTabs() {
   const { colors } = useContext(ThemeContext);
+  const ScanScreenComponent = Platform.OS === 'web'
+    ? WebScanPlaceholderScreen
+    : require('./src/screens/scan/ScanFlowScreen').default;
 
   return (
     <Tab.Navigator
@@ -54,7 +57,7 @@ function MainTabs() {
         options={{ tabBarLabel: 'Accueil', tabBarIcon: ({ color }) => <Text style={{ fontSize: 20, color }}>🏠</Text> }} />
       <Tab.Screen name="Library" component={LibraryScreen}
         options={{ tabBarLabel: 'Biblio', tabBarIcon: ({ color }) => <Text style={{ fontSize: 20, color }}>📚</Text> }} />
-      <Tab.Screen name="Scan" component={ScanFlowScreen}
+      <Tab.Screen name="Scan" component={ScanScreenComponent}
         options={{ tabBarLabel: 'Scanner', tabBarIcon: ({ color }) => <Text style={{ fontSize: 24, color }}>🎙️</Text> }} />
       <Tab.Screen name="Cartography" component={CartographyScreen}
         options={{ tabBarLabel: 'Carto', tabBarIcon: ({ color }) => <Text style={{ fontSize: 20, color }}>🗺️</Text> }} />
