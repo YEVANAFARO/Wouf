@@ -4,12 +4,12 @@
  * Navigation + Auth state management + Theme
  */
 
-import React, { useState, useEffect, useCallback, useContext } from 'react';
+import React, { useState, useEffect, useCallback, useContext, useRef } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { View, Text, ActivityIndicator } from 'react-native';
+import { View, Text, ActivityIndicator, Platform } from 'react-native';
 import { supabase, auth } from './src/config/supabase';
 import { DARK, LIGHT } from './src/config/theme';
 import { ThemeContext, AuthContext, DogsContext } from './src/context/appContexts';
@@ -24,7 +24,7 @@ import LibraryScreen from './src/screens/library/LibraryScreen';
 import ScanDetailScreen from './src/screens/library/ScanDetailScreen';
 import CartographyScreen from './src/screens/cartography/CartographyScreen';
 import ProfileScreen from './src/screens/profile/ProfileScreen';
-import ScanFlowScreen from './src/screens/scan/ScanFlowScreen';
+import WebScanPlaceholderScreen from './src/screens/scan/WebScanPlaceholderScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -32,6 +32,9 @@ const Tab = createBottomTabNavigator();
 // ── Bottom Tab Navigator ───────────────────────────────────
 function MainTabs() {
   const { colors } = useContext(ThemeContext);
+  const ScanScreenComponent = Platform.OS === 'web'
+    ? WebScanPlaceholderScreen
+    : require('./src/screens/scan/ScanFlowScreen').default;
 
   return (
     <Tab.Navigator
@@ -54,7 +57,7 @@ function MainTabs() {
         options={{ tabBarLabel: 'Accueil', tabBarIcon: ({ color }) => <Text style={{ fontSize: 20, color }}>🏠</Text> }} />
       <Tab.Screen name="Library" component={LibraryScreen}
         options={{ tabBarLabel: 'Biblio', tabBarIcon: ({ color }) => <Text style={{ fontSize: 20, color }}>📚</Text> }} />
-      <Tab.Screen name="Scan" component={ScanFlowScreen}
+      <Tab.Screen name="Scan" component={ScanScreenComponent}
         options={{ tabBarLabel: 'Scanner', tabBarIcon: ({ color }) => <Text style={{ fontSize: 24, color }}>🎙️</Text> }} />
       <Tab.Screen name="Cartography" component={CartographyScreen}
         options={{ tabBarLabel: 'Carto', tabBarIcon: ({ color }) => <Text style={{ fontSize: 20, color }}>🗺️</Text> }} />
@@ -75,6 +78,37 @@ export default function App() {
   const [hasOnboarded, setHasOnboarded] = useState(false);
 
   const colors = themeName === 'dark' ? DARK : LIGHT;
+  const dogsRef = useRef(dogs);
+  const hasOnboardedRef = useRef(hasOnboarded);
+  const activeDogIndexRef = useRef(activeDogIndex);
+
+  useEffect(() => { dogsRef.current = dogs; }, [dogs]);
+  useEffect(() => { hasOnboardedRef.current = hasOnboarded; }, [hasOnboarded]);
+  useEffect(() => { activeDogIndexRef.current = activeDogIndex; }, [activeDogIndex]);
+
+  const applyDogsState = useCallback((nextDogs, source = 'unknown') => {
+    const safeDogs = Array.isArray(nextDogs) ? nextDogs : [];
+    const currentDogs = dogsRef.current || [];
+    const currentActiveDogIndex = activeDogIndexRef.current || 0;
+    const beforeActiveDog = currentDogs[currentActiveDogIndex] || null;
+    const nextHasOnboarded = safeDogs.length > 0;
+    const nextActiveDogIndex = safeDogs.length ? Math.min(currentActiveDogIndex, safeDogs.length - 1) : 0;
+    const nextActiveDog = safeDogs[nextActiveDogIndex] || null;
+
+    console.log('[App] hasOnboarded.before', { source, value: hasOnboardedRef.current, dogCount: currentDogs.length });
+    console.log('[App] activeDog.before', { source, index: currentActiveDogIndex, dogId: beforeActiveDog?.id || null });
+
+    dogsRef.current = safeDogs;
+    activeDogIndexRef.current = nextActiveDogIndex;
+    hasOnboardedRef.current = nextHasOnboarded;
+
+    setDogs(safeDogs);
+    setActiveDogIndex(nextActiveDogIndex);
+    setHasOnboarded(nextHasOnboarded);
+
+    console.log('[App] hasOnboarded.after', { source, value: nextHasOnboarded, dogCount: safeDogs.length });
+    console.log('[App] activeDog.after', { source, index: nextActiveDogIndex, dogId: nextActiveDog?.id || null });
+  }, []);
 
   // ── Auth state listener ──────────────────────────────────
   useEffect(() => {
@@ -92,7 +126,7 @@ export default function App() {
         if (session) await loadUserData(session.user.id);
         else {
           setProfile(null);
-          setDogs([]);
+          applyDogsState([], 'auth.signOut');
           setLoading(false);
         }
       }
@@ -104,19 +138,27 @@ export default function App() {
   // ── Charger les données user ─────────────────────────────
   const loadUserData = async (userId) => {
     try {
+      console.log('[App] loadUserData.start', { userId });
       const prof = await profileService.get();
+      console.log('[App] loadUserData.profile.success', { userId, profileId: prof?.id || null });
       setProfile(prof);
 
       const { dogService } = require('./src/services/database');
       const userDogs = await dogService.getAll();
-      setDogs(userDogs);
+      console.log('[App] loadUserData.dogs.success', { userId, dogCount: userDogs.length });
+      applyDogsState(userDogs, 'loadUserData');
 
       // Update streak
       await profileService.updateStreak();
-
-      setHasOnboarded(userDogs.length > 0);
+      console.log('[App] loadUserData.updateStreak.success', { userId });
     } catch (error) {
-      console.error('Error loading user data:', error);
+      console.error('Error loading user data', {
+        userId,
+        message: error?.message || 'unknown_error',
+        code: error?.code || null,
+        details: error?.details || null,
+        hint: error?.hint || null,
+      });
     } finally {
       setLoading(false);
     }
@@ -132,7 +174,7 @@ export default function App() {
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.bg }}>
         <Text style={{ fontSize: 48, marginBottom: 16 }}>🐕</Text>
         <Text style={{ fontSize: 32, fontWeight: '900', color: colors.p, letterSpacing: 6 }}>WOUF</Text>
-        <ActivityIndicator color={colors.p} size="large" style={{ marginTop: 24 }} />
+        <ActivityIndicator color={colors.p} size={32} style={{ marginTop: 24 }} />
       </View>
     );
   }
@@ -148,7 +190,7 @@ export default function App() {
           refreshDogs: async () => {
             const { dogService } = require('./src/services/database');
             const d = await dogService.getAll();
-            setDogs(d);
+            applyDogsState(d, 'refreshDogs');
           },
         }}>
           <StatusBar style={themeName === 'dark' ? 'light' : 'dark'} />
