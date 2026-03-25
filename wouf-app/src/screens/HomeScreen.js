@@ -74,6 +74,29 @@ export default function HomeScreen({ navigation }) {
         </View>
       </View>
 
+      {/* Primary actions */}
+      <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
+        <TouchableOpacity
+          onPress={() => navigation.navigate('AddDog')}
+          style={{ flex: 1, backgroundColor: colors.bg2, borderRadius: 14, padding: 12, borderWidth: 1, borderColor: colors.p + '40' }}
+        >
+          <Text style={{ fontSize: 10, fontWeight: '700', color: colors.p }}>GESTION CHIENS</Text>
+          <Text style={{ fontSize: 13, fontWeight: '800', color: colors.tx, marginTop: 4 }}>➕ Ajouter un chien</Text>
+          <Text style={{ fontSize: 10, color: colors.ts, marginTop: 4 }}>Créer un nouveau profil canin</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => activeDog ? navigation.navigate('Scan') : navigation.navigate('AddDog')}
+          style={{ flex: 1, backgroundColor: colors.pG, borderRadius: 14, padding: 12, borderWidth: 1, borderColor: colors.p + '30' }}
+        >
+          <Text style={{ fontSize: 10, fontWeight: '700', color: colors.p }}>ACTION PRINCIPALE</Text>
+          <Text style={{ fontSize: 13, fontWeight: '800', color: colors.tx, marginTop: 4 }}>
+            {activeDog ? '🎙️ Scanner un aboiement' : 'Créer un chien pour scanner'}
+          </Text>
+          <Text style={{ fontSize: 10, color: colors.ts, marginTop: 4 }}>
+            {activeDog ? 'Ouvrir le scanner' : 'Le scan nécessite un chien actif'}
+          </Text>
+        </TouchableOpacity>
+      </View>
 
       {/* Plan + referral quick status */}
       <View style={{ backgroundColor: colors.bg2, borderRadius: 14, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: colors.bd }}>
@@ -86,20 +109,25 @@ export default function HomeScreen({ navigation }) {
         </Text>
       </View>
 
-      {/* Shop teaser */}
-      <View style={{ backgroundColor: colors.bg2, borderRadius: 14, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: colors.g + '40' }}>
-        <Text style={{ fontSize: 10, fontWeight: '700', color: colors.g }}>🛍️ SHOP WOUF</Text>
-        <Text style={{ fontSize: 12, color: colors.tx, marginTop: 4 }}>À venir — récompenses, perks fondateurs et contenus premium.</Text>
-      </View>
-
-      {/* Scan button */}
-      <View style={{ alignItems: 'center', marginVertical: 20 }}>
-        <TouchableOpacity onPress={() => activeDog ? navigation.navigate('Scan') : navigation.navigate('AddDog')}
-          style={{ width: 100, height: 100, borderRadius: 50, backgroundColor: colors.p,
-            justifyContent: 'center', alignItems: 'center', opacity: activeDog ? 1 : 0.6 }}>
-          <Text style={{ fontSize: 38 }}>🎙️</Text>
-        </TouchableOpacity>
-        <Text style={{ fontSize: 13, fontWeight: '700', color: colors.tx, marginTop: 14 }}>{activeDog ? 'Scanner un aboiement' : 'Ajouter un chien pour scanner'}</Text>
+      {/* Navigation shortcuts */}
+      <View style={{ backgroundColor: colors.bg2, borderRadius: 14, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: colors.bd }}>
+        <Text style={{ fontSize: 10, fontWeight: '700', color: colors.ts }}>RACCOURCIS</Text>
+        <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+          {[
+            ['📚', 'Bibliothèque', 'Library'],
+            ['🗺️', 'Cartographie', 'Cartography'],
+            ['👤', 'Profil', 'Profile'],
+          ].map(([icon, label, route]) => (
+            <TouchableOpacity
+              key={route}
+              onPress={() => navigation.navigate(route)}
+              style={{ flex: 1, backgroundColor: colors.bg3, borderRadius: 10, paddingVertical: 10, alignItems: 'center', borderWidth: 1, borderColor: colors.bd }}
+            >
+              <Text style={{ fontSize: 16 }}>{icon}</Text>
+              <Text style={{ fontSize: 10, color: colors.tx, marginTop: 4 }}>{label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
       </View>
 
       {/* Tip */}

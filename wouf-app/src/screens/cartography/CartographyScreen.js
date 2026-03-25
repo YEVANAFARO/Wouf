@@ -14,6 +14,7 @@ function clamp(value, min, max) {
 }
 
 const DAY_LABELS = ['D', 'L', 'M', 'M', 'J', 'V', 'S'];
+const LOAD_TIMEOUT_MS = 8000;
 const EMPTY_STATS = {
   total: 0,
   validatedCount: 0,
@@ -49,7 +50,10 @@ export default function CartographyScreen() {
     setLoading(true);
     setLoadError('');
     try {
-      const nextStats = await scanService.getStats(activeDog.id);
+      const nextStats = await Promise.race([
+        scanService.getStats(activeDog.id),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('cartography_timeout')), LOAD_TIMEOUT_MS)),
+      ]);
       setStats({ ...EMPTY_STATS, ...nextStats });
     } catch (error) {
       setStats(EMPTY_STATS);

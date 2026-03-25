@@ -15,6 +15,14 @@ import { BREEDS, PERSONALITIES, TRIGGERS, HEALTH_SIGNS, PHYSICAL_SPECS, ACTIVITI
 import { getUserFacingError } from '../../services/userFacingErrors';
 
 const STEPS = ['photo', 'identity', 'breed', 'size', 'personality', 'triggers', 'environment', 'health', 'summary'];
+const SAVE_TIMEOUT_MS = 15000;
+
+function withTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(`${label}_timeout`)), ms)),
+  ]);
+}
 
 export default function DogProfileScreen({ navigation, route }) {
   const { colors } = useContext(ThemeContext);
@@ -62,19 +70,21 @@ export default function DogProfileScreen({ navigation, route }) {
     setSaving(true);
     try {
       console.log('[DogProfile] dog.create.start', { name: dog.name.trim(), hasPhoto: Boolean(dog.photo) });
-      const created = await dogService.create({
+      const created = await withTimeout(dogService.create({
         ...dog,
         name: dog.name.trim(),
         favTreats: dog.favTreats.trim(),
         favToys: dog.favToys.trim(),
-      });
+      }), SAVE_TIMEOUT_MS, 'dog_create');
+
+      console.log('[DogProfile] dog.create.success', { dogId: created?.id });
 
       console.log('[DogProfile] dog.create.success', { dogId: created?.id });
 
       let photoNotice = null;
       if (dog.photo) {
         try {
-          await dogService.uploadPhoto(created.id, dog.photo);
+          await withTimeout(dogService.uploadPhoto(created.id, dog.photo), SAVE_TIMEOUT_MS, 'dog_photo_upload');
         } catch (photoError) {
           console.warn('[DogProfile] photo upload skipped', photoError?.message || 'unknown_error');
           photoNotice = 'Le profil est créé, mais la photo sera à réessayer plus tard.';
@@ -83,7 +93,7 @@ export default function DogProfileScreen({ navigation, route }) {
 
       let profileNotice = null;
       try {
-        await profileService.addXp(200);
+        await withTimeout(profileService.addXp(200), SAVE_TIMEOUT_MS, 'dog_reward');
       } catch (profileError) {
         console.warn('[DogProfile] profile reward skipped', {
           message: profileError?.message || 'unknown_error',
@@ -95,8 +105,12 @@ export default function DogProfileScreen({ navigation, route }) {
       }
 
       console.log('[DogProfile] dog.refresh.start');
-      await refreshDogs();
-      console.log('[DogProfile] dog.refresh.success');
+      try {
+        await withTimeout(refreshDogs(), SAVE_TIMEOUT_MS, 'dog_refresh');
+        console.log('[DogProfile] dog.refresh.success');
+      } catch (refreshError) {
+        console.warn('[DogProfile] dog.refresh.skipped', refreshError?.message || 'unknown_error');
+      }
       console.log('[DogProfile] navigation.afterDogRefresh', {
         routeName: route?.name || null,
         canGoBack: navigation.canGoBack(),
