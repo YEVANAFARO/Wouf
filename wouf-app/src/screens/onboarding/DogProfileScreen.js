@@ -79,6 +79,8 @@ export default function DogProfileScreen({ navigation, route }) {
 
       console.log('[DogProfile] dog.create.success', { dogId: created?.id });
 
+      console.log('[DogProfile] dog.create.success', { dogId: created?.id });
+
       let photoNotice = null;
       if (dog.photo) {
         try {
