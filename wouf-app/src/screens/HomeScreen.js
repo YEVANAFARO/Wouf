@@ -4,12 +4,25 @@ import { View, Text, TouchableOpacity, ScrollView } from 'react-native';
 import { ThemeContext, AuthContext, DogsContext } from '../context/appContexts';
 import { DAILY_TIPS } from '../config/constants';
 
+function toFiniteNumber(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
 export default function HomeScreen({ navigation }) {
   const { colors } = useContext(ThemeContext);
   const { profile } = useContext(AuthContext);
   const { activeDog, dogs, activeDogIndex, setActiveDog } = useContext(DogsContext);
   const day = new Date().getDate();
   const tip = DAILY_TIPS[day % DAILY_TIPS.length];
+  const level = Math.max(1, Math.floor(toFiniteNumber(profile?.level, 1)));
+  const xp = Math.max(0, toFiniteNumber(profile?.xp, 0));
+  const xpTarget = level * 200;
+  const xpPct = clamp(Math.round((xp / xpTarget) * 100), 0, 100);
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: colors.bg, padding: 16 }}>
@@ -51,12 +64,12 @@ export default function HomeScreen({ navigation }) {
           <View>
             <Text style={{ fontSize: 10, color: colors.ts }}>👋 {activeDog?.name || 'Mon chien'}</Text>
             <Text style={{ fontSize: 13, fontWeight: '800', color: colors.g }}>
-              Niv.{profile?.level || 1} · {profile?.xp || 0}/{(profile?.level || 1) * 200} XP
+              Niv.{level} · {xp}/{xpTarget} XP
             </Text>
           </View>
         </View>
         <View style={{ height: 4, backgroundColor: colors.bd, borderRadius: 2, marginTop: 6 }}>
-          <View style={{ width: `${Math.round((profile?.xp || 0) / ((profile?.level || 1) * 200) * 100)}%`,
+          <View style={{ width: `${xpPct}%`,
             height: '100%', backgroundColor: colors.g, borderRadius: 2 }} />
         </View>
       </View>
